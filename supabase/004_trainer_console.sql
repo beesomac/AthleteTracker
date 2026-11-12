@@ -1,5 +1,11 @@
 -- Training Log, update 4: trainer console, multiple athletes, programs and WOD leaderboards.
--- Run once in Supabase → SQL Editor → New query, after 001–003. Safe to run again.
+-- Run once in Supabase → SQL Editor → New query, after schema.sql. Safe to run again.
+-- It doesn't need 002 or 003 to have been run, and it runs as one transaction: if anything
+-- fails, nothing is changed.
+--
+-- 0. Fill this in: replace TRAINER_EMAIL_HERE (in step 1 below) with the trainer's login email.
+--    Everyone else already in allowed_emails becomes an athlete. If you leave it, the admin email
+--    from 002's notify settings is used; with neither, the script stops without changing anything.
 --
 -- Before running: merge/deploy the matching website first. The new site works with or
 -- without this update; the old site keeps working afterwards for the existing athlete too.
@@ -15,6 +21,8 @@
 --   5. Row-level security: trainers see and change everything; athletes only their own data,
 --      their published programs, and leaderboards (names only, never other athletes' emails).
 
+begin;
+
 -- ─── 1. Members and roles ────────────────────────────────────────────────────────────────
 create table if not exists public.members (
   email text primary key check (email = lower(email)),
@@ -28,19 +36,35 @@ create table if not exists public.members (
 alter table public.members add column if not exists legacy_files boolean not null default false;
 alter table public.members enable row level security;
 
-insert into public.members (email, display_name, role, legacy_files)
-select lower(a.email),
-       initcap(split_part(a.email, '@', 1)),
-       case when lower(a.email) = lower(coalesce((select admin_email from public.notify_settings where id = 1), '')) then 'trainer' else 'athlete' end,
-       true
-from public.allowed_emails a
-where a.email not like '%\_EMAIL\_HERE'
-on conflict (email) do nothing;
+do $$
+declare
+  trainer text := lower(trim('TRAINER_EMAIL_HERE'));
+begin
+  if trainer = 'trainer_email_here' or trainer = '' then
+    trainer := null;
+    -- 002's notify settings, if that update was run.
+    if to_regclass('public.notify_settings') is not null then
+      execute 'select lower(admin_email) from public.notify_settings where id = 1' into trainer;
+      if trainer like '%\_email\_here' then trainer := null; end if;
+    end if;
+  end if;
+  if trainer is null and not exists (select 1 from public.members where role = 'trainer') then
+    raise exception 'Replace TRAINER_EMAIL_HERE near the top of this script with the trainer''s login email, then run it again. Nothing was changed.';
+  end if;
 
--- If no trainer could be worked out (no notify settings), make the first email the trainer.
-update public.members set role = 'trainer'
-where not exists (select 1 from public.members where role = 'trainer')
-  and email = (select email from public.members order by created_at, email limit 1);
+  -- Everyone who could already sign in. They see the sessions/ files until programs are published for them.
+  insert into public.members (email, display_name, role, legacy_files)
+  select lower(a.email), initcap(split_part(a.email, '@', 1)), 'athlete', true
+  from public.allowed_emails a
+  where a.email not like '%\_EMAIL\_HERE'
+  on conflict (email) do nothing;
+
+  if trainer is not null then
+    insert into public.members (email, display_name, role, legacy_files)
+    values (trainer, initcap(split_part(trainer, '@', 1)), 'trainer', false)
+    on conflict (email) do update set role = 'trainer', legacy_files = false, active = true;
+  end if;
+end $$;
 
 create or replace function public.my_email()
 returns text language sql stable as $$ select lower(coalesce(auth.jwt() ->> 'email', '')) $$;
@@ -120,6 +144,27 @@ create policy "athletes read programs" on public.programs for select to authenti
   using (published and public.my_role() = 'athlete' and (athlete_email is null or athlete_email = public.my_email()));
 
 -- ─── 3. Per-athlete feedback ─────────────────────────────────────────────────────────────
+-- Tables and columns from updates 002 and 003, in case those weren't run.
+alter table public.ticks add column if not exists skipped boolean not null default false;
+alter table public.ticks add column if not exists skip_reason text;
+create table if not exists public.session_finishes (
+  session_id text primary key,
+  finished_by_email text,
+  finished_at timestamptz not null default now(),
+  summary text,
+  details jsonb not null default '{}'::jsonb
+);
+alter table public.session_finishes enable row level security;
+create table if not exists public.lift_maxes (
+  lift_key text primary key,
+  lift_name text,
+  kg numeric not null check (kg > 0 and kg < 1000),
+  tested_on date,
+  updated_by_email text,
+  updated_at timestamptz not null default now()
+);
+alter table public.lift_maxes enable row level security;
+
 alter table public.ticks add column if not exists athlete_email text;
 alter table public.notes add column if not exists athlete_email text;
 alter table public.session_finishes add column if not exists athlete_email text;
@@ -148,21 +193,27 @@ do $$
 begin
   if not exists (select 1 from information_schema.key_column_usage
                  where table_schema = 'public' and table_name = 'ticks' and constraint_name = 'ticks_pkey' and column_name = 'athlete_email') then
-    delete from public.ticks where athlete_email is null;
+    if exists (select 1 from public.ticks where athlete_email is null) then
+      raise exception 'Existing ticks rows have no athlete to belong to. Check allowed_emails has the athlete''s email, then run again. Nothing was changed.';
+    end if;
     alter table public.ticks alter column athlete_email set not null;
     alter table public.ticks drop constraint ticks_pkey;
     alter table public.ticks add constraint ticks_pkey primary key (athlete_email, session_id, exercise_id);
   end if;
   if not exists (select 1 from information_schema.key_column_usage
                  where table_schema = 'public' and table_name = 'session_finishes' and constraint_name = 'session_finishes_pkey' and column_name = 'athlete_email') then
-    delete from public.session_finishes where athlete_email is null;
+    if exists (select 1 from public.session_finishes where athlete_email is null) then
+      raise exception 'Existing session_finishes rows have no athlete to belong to. Check allowed_emails has the athlete''s email, then run again. Nothing was changed.';
+    end if;
     alter table public.session_finishes alter column athlete_email set not null;
     alter table public.session_finishes drop constraint session_finishes_pkey;
     alter table public.session_finishes add constraint session_finishes_pkey primary key (athlete_email, session_id);
   end if;
   if not exists (select 1 from information_schema.key_column_usage
                  where table_schema = 'public' and table_name = 'lift_maxes' and constraint_name = 'lift_maxes_pkey' and column_name = 'athlete_email') then
-    delete from public.lift_maxes where athlete_email is null;
+    if exists (select 1 from public.lift_maxes where athlete_email is null) then
+      raise exception 'Existing lift_maxes rows have no athlete to belong to. Check allowed_emails has the athlete''s email, then run again. Nothing was changed.';
+    end if;
     alter table public.lift_maxes alter column athlete_email set not null;
     alter table public.lift_maxes drop constraint lift_maxes_pkey;
     alter table public.lift_maxes add constraint lift_maxes_pkey primary key (athlete_email, lift_key);
@@ -279,6 +330,7 @@ $$;
 grant execute on function public.wod_board() to authenticated;
 
 -- ─── 5. Notifications: skip trainers' own notes, say which athlete ───────────────────────
+-- Only used when 002 (notifications) has been run; harmless otherwise.
 create or replace function public.on_note_added()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare admin text;
@@ -311,11 +363,15 @@ end $$;
 -- ─── 6. Live updates ─────────────────────────────────────────────────────────────────────
 do $$
 begin
+  begin alter publication supabase_realtime add table public.session_finishes; exception when duplicate_object then null; end;
+  begin alter publication supabase_realtime add table public.lift_maxes; exception when duplicate_object then null; end;
   begin alter publication supabase_realtime add table public.members; exception when duplicate_object then null; end;
   begin alter publication supabase_realtime add table public.programs; exception when duplicate_object then null; end;
   begin alter publication supabase_realtime add table public.wods; exception when duplicate_object then null; end;
   begin alter publication supabase_realtime add table public.wod_results; exception when duplicate_object then null; end;
 end $$;
+
+commit;
 
 notify pgrst, 'reload schema';
 
