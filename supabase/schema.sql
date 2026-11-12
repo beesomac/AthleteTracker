@@ -76,3 +76,6 @@ begin
   begin alter publication supabase_realtime add table public.ticks; exception when duplicate_object then null; end;
   begin alter publication supabase_realtime add table public.notes; exception when duplicate_object then null; end;
 end $$;
+
+-- 6. Make the website see the new tables and function straight away.
+notify pgrst, 'reload schema';
