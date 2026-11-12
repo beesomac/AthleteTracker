@@ -62,6 +62,10 @@
         });
         if (error) throw error;
       },
+      async signInWithPassword(addr, password) {
+        const { error } = await sb.auth.signInWithPassword({ email: addr, password });
+        if (error) throw error;
+      },
       async signOut() { await sb.auth.signOut(); },
       async start(onData) {
         const allowed = await sb.rpc("am_i_allowed");
@@ -116,6 +120,7 @@
       async currentUser() { return me; },
       onAuthChange() {},
       async signIn() {},
+      async signInWithPassword() {},
       async signOut() {},
       async start(onData) { listener = onData; emit(); },
       async setTick(sid, eid, sets) {

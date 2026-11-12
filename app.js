@@ -155,11 +155,13 @@
   function renderLogin() {
     const l = state.login;
     if (l.sent) return `<div class="login"><h2>Check your email</h2><p>We sent a sign-in link to <strong>${esc(l.email)}</strong>. Open it on this phone and you'll land back here, signed in.</p><button class="btn" data-act="login-again">Use a different email</button></div>`;
-    return `<form class="login" id="login-form"><h2>Sign in</h2><p>Enter your email and we'll send you a one-tap sign-in link. Only John and Trae's emails can see the log.</p>
+    return `<form class="login" id="login-form"><h2>Sign in</h2><p>Only John and Trae can see the log.</p>
       <label for="login-email" class="eyebrow">Email</label>
       <input id="login-email" type="email" autocomplete="email" required placeholder="you@example.com" value="${esc(l.email || "")}">
+      <label for="login-password" class="eyebrow">Password</label>
+      <input id="login-password" type="password" autocomplete="current-password" placeholder="Leave blank to get an email link instead">
       ${l.error ? `<div class="banner">${esc(l.error)}</div>` : ""}
-      <button class="btn primary" type="submit" ${l.sending ? "disabled" : ""}>${l.sending ? "Sending…" : "Email me a link"}</button></form>`;
+      <button class="btn primary" type="submit" ${l.sending ? "disabled" : ""}>${l.sending ? "Signing in…" : "Sign in"}</button></form>`;
   }
 
   function render() {
@@ -200,13 +202,19 @@
     if (ev.target.id !== "login-form") return;
     ev.preventDefault();
     const email = $("#login-email").value.trim();
+    const password = $("#login-password").value;
     if (!email) return;
     state.login = { email, sending: true, sent: false, error: null }; render();
-    try { await store.signIn(email); state.login.sent = true; }
-    catch (e) {
-      state.login.error = /rate limit/i.test(e.message || "")
-        ? "Too many sign-in emails in the last hour. Wait an hour, or use the most recent link already in your inbox."
-        : "Couldn't send the link: " + (e.message || "unknown error") + ". Check the address and try again.";
+    if (password) {
+      try { await store.signInWithPassword(email, password); }
+      catch (e) { state.login.error = "That email and password didn't match. Check them and try again, or leave the password blank to get an email link."; }
+    } else {
+      try { await store.signIn(email); state.login.sent = true; }
+      catch (e) {
+        state.login.error = /rate limit/i.test(e.message || "")
+          ? "Too many sign-in emails in the last hour. Wait an hour, use the most recent link already in your inbox, or sign in with a password."
+          : "Couldn't send the link: " + (e.message || "unknown error") + ". Check the address and try again.";
+      }
     }
     state.login.sending = false; render();
   });

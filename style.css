@@ -111,3 +111,4 @@ a:focus-visible,button:focus-visible,textarea:focus-visible{outline:2px solid va
 .login p{margin:0;color:var(--muted);font-size:14px}
 .signout{background:none;border:0;color:var(--muted);font:12px var(--body);cursor:pointer;text-decoration:underline;padding:0}
 .demo{background:var(--warn-soft);font-size:12px;text-align:center;padding:4px 16px}
+.login .btn.primary{justify-content:center;padding-block:10px;font-size:15px}

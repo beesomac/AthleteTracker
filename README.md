@@ -32,6 +32,8 @@ Session fields:
 3. Under **Authentication → URL Configuration**, set **Site URL** to the website address (from step 2 below) and add it under **Redirect URLs** too.
 4. Under **Project Settings → API**, copy the **Project URL** and the **anon public** key into `config.js`. Add friendly names under `people`.
 
+Sign-in works with a password (no email needed) or a one-tap email link. Supabase free projects only send a few emails an hour, so passwords are easier. To give someone a password: **Authentication → Users → Add user → Create new user**, enter the email and a password, tick **Auto Confirm User**.
+
 Only the emails in `allowed_emails` can see or change anything. To add someone later, run `insert into allowed_emails values ('their@email.com');` in the SQL Editor.
 
 ### 2. Hosting (Vercel)
