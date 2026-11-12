@@ -189,3 +189,15 @@ li.step-row{grid-template-columns:30px 1fr 84px 44px}
 .kg-box span{position:absolute;right:8px;bottom:6px;font-size:11px;font-weight:600;color:var(--muted);pointer-events:none}
 .kg-box.filled .kg-input{border-color:var(--done);background:var(--done-soft)}
 @media (max-width:360px){li.step-row{grid-template-columns:26px 1fr 72px 40px;gap:8px}.kg-box{width:72px}}
+/* 1RM in exercise details */
+.lift-line{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.lift-bits{display:grid;gap:2px;min-width:0}
+.onerm{font-family:var(--display);font-weight:700;font-size:22px;line-height:1.1}
+.onerm span{font-family:var(--body);font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-right:6px}
+.onerm.est{font-size:19px;color:var(--muted)}
+.link-btn{background:none;border:1px solid var(--line);border-radius:8px;padding:6px 10px;color:var(--info);font:600 13px var(--body);cursor:pointer;white-space:nowrap;background:var(--surface)}
+.max-form{display:grid;grid-template-columns:1fr 1fr;gap:10px;background:var(--bg);border-radius:8px;padding:10px}
+.max-form label{display:grid;gap:4px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:600;color:var(--muted);min-width:0}
+.max-form input{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:10px;font:600 16px var(--body);background:var(--surface);color:var(--ink)}
+.max-form .row{grid-column:1/-1;display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
+.max-form input{min-width:0;max-width:100%;-webkit-appearance:none;appearance:none;height:44px}

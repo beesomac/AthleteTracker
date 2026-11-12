@@ -31,10 +31,11 @@
     let reloadTimer = null;
 
     async function loadAll() {
-      const [t, n, f] = await Promise.all([
+      const [t, n, f, m] = await Promise.all([
         sb.from("ticks").select("*"),
         sb.from("notes").select("*").order("created_at", { ascending: true }),
         sb.from("session_finishes").select("*"),
+        sb.from("lift_maxes").select("*"),
       ]);
       if (t.error) throw t.error;
       if (n.error) throw n.error;
@@ -43,7 +44,9 @@
       const finishes = {};
       // Older databases without the finish table still work; finishing just won't save.
       if (!f.error) for (const r of f.data) finishes[r.session_id] = fromFinishRow(r);
-      return { ticks, notes: n.data.map(fromNoteRow), finishes };
+      const maxes = {};
+      if (!m.error) for (const r of m.data) maxes[r.lift_key] = { lift: r.lift_key, name: r.lift_name, kg: r.kg, on: r.tested_on, by: r.updated_by_email };
+      return { ticks, notes: n.data.map(fromNoteRow), finishes, maxes };
     }
     function scheduleReload() {
       clearTimeout(reloadTimer);
@@ -88,6 +91,7 @@
           .on("postgres_changes", { event: "*", schema: "public", table: "ticks" }, scheduleReload)
           .on("postgres_changes", { event: "*", schema: "public", table: "notes" }, scheduleReload)
           .on("postgres_changes", { event: "*", schema: "public", table: "session_finishes" }, scheduleReload)
+          .on("postgres_changes", { event: "*", schema: "public", table: "lift_maxes" }, scheduleReload)
           .subscribe();
         // Catch up when the phone wakes the tab back up.
         document.addEventListener("visibilitychange", () => { if (!document.hidden) scheduleReload(); });
@@ -107,6 +111,16 @@
       },
       async reopenSession(sid) {
         const { error } = await sb.from("session_finishes").delete().eq("session_id", sid);
+        if (error) throw error;
+      },
+      async saveMax(key, name, kg, on) {
+        const { error } = await sb.from("lift_maxes").upsert({
+          lift_key: key, lift_name: name, kg, tested_on: on, updated_by_email: email, updated_at: new Date().toISOString(),
+        });
+        if (error) throw error;
+      },
+      async deleteMax(key) {
+        const { error } = await sb.from("lift_maxes").delete().eq("lift_key", key);
         if (error) throw error;
       },
       async addNote(n) {
@@ -134,7 +148,7 @@
       let d = null;
       try { d = JSON.parse(localStorage.getItem(KEY)); } catch (e) {}
       d = d || {};
-      return { ticks: d.ticks || {}, notes: d.notes || [], finishes: d.finishes || {} };
+      return { ticks: d.ticks || {}, notes: d.notes || [], finishes: d.finishes || {}, maxes: d.maxes || {} };
     }
     function write(d) { try { localStorage.setItem(KEY, JSON.stringify(d)); } catch (e) {} }
     let listener = null;
@@ -159,6 +173,12 @@
       },
       async reopenSession(sid) {
         const d = read(); delete d.finishes[sid]; write(d);
+      },
+      async saveMax(key, name, kg, on) {
+        const d = read(); d.maxes[key] = { lift: key, name, kg, on, by: me }; write(d);
+      },
+      async deleteMax(key) {
+        const d = read(); delete d.maxes[key]; write(d);
       },
       async addNote(n) {
         const d = read();

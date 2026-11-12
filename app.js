@@ -6,7 +6,7 @@
   const tickId = window.TrainingStore.tickKey;
 
   const state = {
-    me: null, sessions: [], ticks: {}, notes: [], finishes: {}, openSkip: null, finishing: null, openLog: null,
+    me: null, sessions: [], ticks: {}, notes: [], finishes: {}, openSkip: null, finishing: null, openLog: null, maxes: {}, openMax: null,
     loaded: false, error: null, login: { sent: false, sending: false, error: null },
     openComposer: null, reviewFilter: "open", confirmDelete: null,
   };
@@ -86,16 +86,37 @@
     return lifts;
   }
   // Best so far for this lift, and a suggested weight when the session gives a % of 1RM.
-  function liftLine(ex) {
+  // The 1RM used for suggestions: an entered (known) 1RM wins over the estimate from logged sets.
+  function oneRM(name) {
+    const m = state.maxes[liftKey(name)];
+    if (m && m.kg) return { kg: +m.kg, known: true, on: m.on };
+    const L = liftHistory()[liftKey(name)];
+    if (L && L.best) return { kg: L.best.e1rm, known: false };
+    return null;
+  }
+  function liftLine(ex, sid) {
     const L = liftHistory()[liftKey(ex.name)];
-    const bits = [];
-    if (L && L.best) bits.push(`Best: ${L.best.reps} × ${L.best.kg} kg · est. 1RM <b>${round1(L.best.e1rm)} kg</b>`);
-    else if (L && L.heaviest) bits.push(`Heaviest: ${L.heaviest.kg} kg`);
-    if (ex.pct && L && L.best) {
-      const kg = Math.round((L.best.e1rm * ex.pct) / 2.5) * 2.5;
-      bits.push(`Suggested: <b>${kg} kg</b> (${Math.round(ex.pct * 100)}% of 1RM)`);
-    } else if (ex.suggestKg) bits.push(`Suggested: <b>${esc(ex.suggestKg)} kg</b>`);
-    return bits.length ? `<div class="lift-line">${bits.join(" · ")}</div>` : "";
+    const m = state.maxes[liftKey(ex.name)];
+    const key = liftKey(ex.name) + "@" + sid;
+    const lines = [];
+    if (m && m.kg) lines.push(`<span class="onerm"><span>1RM</span>${esc(m.kg)} kg</span>${m.on ? ` <span class="extra">tested ${esc(fmtDate(m.on))}</span>` : ""}`);
+    else if (L && L.best) lines.push(`<span class="onerm est"><span>est. 1RM</span>${round1(L.best.e1rm)} kg</span>`);
+    if (L && L.best) lines.push(`<span class="extra">Best set ${L.best.reps} × ${L.best.kg} kg${m && m.kg ? ` · est. ${round1(L.best.e1rm)} kg` : ""}</span>`);
+    else if (L && L.heaviest) lines.push(`<span class="extra">Heaviest ${L.heaviest.kg} kg</span>`);
+    const p = ex.pct || (Array.isArray(ex.pcts) ? ex.pcts[0] : null);
+    const rm = oneRM(ex.name);
+    if (p && rm) lines.push(`Suggested: <b>${to2_5(rm.kg * p)} kg</b> (${Math.round(p * 100)}% of ${rm.known ? "" : "est. "}1RM)`);
+    else if (ex.suggestKg) lines.push(`Suggested: <b>${esc(ex.suggestKg)} kg</b>`);
+    const btn = `<button class="link-btn" data-act="open-max" data-key="${esc(key)}">${m && m.kg ? "Edit 1RM" : "Enter 1RM"}</button>`;
+    let html = `<div class="lift-line"><div class="lift-bits">${lines.length ? lines.map((l) => `<div>${l}</div>`).join("") : `<span class="extra">No 1RM yet</span>`}</div>${btn}</div>`;
+    if (state.openMax === key) {
+      html += `<form class="max-form" data-lift="${esc(liftKey(ex.name))}" data-name="${esc(ex.name)}">
+        <label>1RM (kg)<input id="max-kg" type="number" inputmode="decimal" min="0" max="999" step="0.5" value="${m && m.kg ? esc(m.kg) : ""}"></label>
+        <label>Tested on<input id="max-on" type="date" value="${esc((m && m.on) || localDay(new Date().toISOString()))}"></label>
+        <div class="row">${m && m.kg ? `<button type="button" class="btn" data-act="clear-max" data-lift="${esc(liftKey(ex.name))}">Remove</button>` : ""}<button type="button" class="btn" data-act="cancel-max">Cancel</button><button type="submit" class="btn primary">Save 1RM</button></div>
+      </form>`;
+    }
+    return html;
   }
   // Planned weight for a set. A weight typed earlier in this session carries forward:
   // the same kg each set, or scaled when the exercise has a % of 1RM per set (pcts).
@@ -116,7 +137,8 @@
     }
     const L = liftHistory()[liftKey(ex.name)];
     const p = pctFor(ex, r);
-    if (p && L && L.best) return to2_5(L.best.e1rm * p);
+    const rm = oneRM(ex.name);
+    if (p && rm) return to2_5(rm.kg * p);
     if (ex.suggestKg) return +ex.suggestKg;
     return L && L.last ? L.last.kg : "";
   }
@@ -313,7 +335,7 @@
           ${skipped && e.reason ? `<div class="skip-reason">Why: ${esc(e.reason)}</div>` : ""}
           ${ex.cue ? `<div class="cue">${esc(ex.cue)}</div>` : ""}
           ${ex.extra ? `<div class="extra">${esc(ex.extra)}</div>` : ""}
-          ${liftLine(ex)}
+          ${hold ? "" : liftLine(ex, s.id)}
           <div class="ex-row">
             ${hold ? `<span class="who-ticked">Not this session</span>` : skipped ? `<span class="who-ticked">Skipped by ${esc(nameOf(t.by))} · ${esc(fmtWhen(t.at))}</span>` : `<span class="who-ticked">${doneN}/${n} ${circuit ? "rounds" : "sets"} done</span>`}
             <div class="tools">
@@ -363,18 +385,20 @@
   }
 
   function renderRecords() {
-    const lifts = Object.values(liftHistory()).sort((a, b) => a.name.localeCompare(b.name));
+    const hist = liftHistory();
+    for (const k in state.maxes) if (!hist[k] && state.maxes[k].kg) hist[k] = { name: state.maxes[k].name || k, sets: [], best: null, heaviest: null };
+    const lifts = Object.values(hist).sort((a, b) => a.name.localeCompare(b.name));
     let html = `<section class="hero"><div class="eyebrow">Across all sessions</div><h2>Records</h2>
       <div class="extra">Estimated 1RM uses the Epley formula (weight × (1 + reps ÷ 30)) on sets of 12 reps or fewer. It's a guide for choosing weights, not a tested max.</div></section>`;
     if (!lifts.length) return html + `<div class="empty"><strong>No weights logged yet</strong><span>Tap any set during a session to log reps and kg. Each lift's best shows up here.</span></div>`;
     html += `<div class="records">`;
     for (const L of lifts) {
-      const hist = L.sets.slice().reverse().slice(0, 6);
+      const recent = L.sets.slice().reverse().slice(0, 6);
       html += `<article class="record">
-        <div class="record-top"><div class="ex-name">${esc(L.name)}</div>${L.best ? `<div class="record-1rm"><span>est. 1RM</span>${round1(L.best.e1rm)} kg</div>` : ""}</div>
+        <div class="record-top"><div class="ex-name">${esc(L.name)}</div>${(() => { const m = state.maxes[liftKey(L.name)]; return m && m.kg ? `<div class="record-1rm"><span>1RM</span>${esc(m.kg)} kg</div>` : L.best ? `<div class="record-1rm"><span>est. 1RM</span>${round1(L.best.e1rm)} kg</div>` : ""; })()}</div>
         <div class="extra">${L.best ? `Best set ${L.best.reps} × ${L.best.kg} kg on ${esc(fmtDate(localDay(L.best.at)))}` : ""}${L.best && L.heaviest ? " · " : ""}${L.heaviest ? `Heaviest ${L.heaviest.kg} kg` : ""}</div>
         <table class="hist"><thead><tr><th>Date</th><th>Set</th><th>Reps × kg</th><th>est. 1RM</th></tr></thead><tbody>
-        ${hist.map((x) => `<tr${x.pr ? ' class="pr-row"' : ""}><td>${esc(x.at ? fmtDate(localDay(x.at)) : "")}</td><td>${esc(x.session.short || "")} #${x.round}</td><td>${x.reps || "–"} × ${x.kg}</td><td>${x.e1rm ? round1(x.e1rm) + (x.pr ? " ★" : "") : "–"}</td></tr>`).join("")}
+        ${recent.map((x) => `<tr${x.pr ? ' class="pr-row"' : ""}><td>${esc(x.at ? fmtDate(localDay(x.at)) : "")}</td><td>${esc(x.session.short || "")} #${x.round}</td><td>${x.reps || "–"} × ${x.kg}</td><td>${x.e1rm ? round1(x.e1rm) + (x.pr ? " ★" : "") : "–"}</td></tr>`).join("")}
         </tbody></table></article>`;
     }
     return html + `</div>`;
@@ -477,6 +501,17 @@
   }
 
   app.addEventListener("submit", async (ev) => {
+    if (ev.target.classList.contains("max-form")) {
+      ev.preventDefault();
+      const f = ev.target; const k = f.dataset.lift;
+      const kg = parseFloat($("#max-kg").value); const on = $("#max-on").value || null;
+      if (!(kg > 0)) return;
+      const keep = state.maxes[k];
+      state.maxes[k] = { lift: k, name: f.dataset.name, kg, on, by: state.me };
+      state.openMax = null; render();
+      try { await store.saveMax(k, f.dataset.name, kg, on); } catch (e) { if (keep) state.maxes[k] = keep; else delete state.maxes[k]; render(); writeFailed(e); }
+      return;
+    }
     if (ev.target.classList.contains("log-form")) {
       ev.preventDefault();
       const f = ev.target; const { sid, eid } = f.dataset; const set = +f.dataset.set;
@@ -534,6 +569,15 @@
         if (ex && targetReps(ex)) sets[set].reps = targetReps(ex);
       }
       await saveTick(sid, eid, { sets });
+    } else if (act === "open-max") {
+      state.openMax = state.openMax === btn.dataset.key ? null : btn.dataset.key; render();
+      const el = document.getElementById("max-kg"); if (el) el.focus();
+    } else if (act === "cancel-max") {
+      state.openMax = null; render();
+    } else if (act === "clear-max") {
+      const k = btn.dataset.lift; const keep = state.maxes[k];
+      delete state.maxes[k]; state.openMax = null; render();
+      try { await store.deleteMax(k); } catch (e) { state.maxes[k] = keep; render(); writeFailed(e); }
     } else if (act === "open-log") {
       state.openLog = state.openLog === btn.dataset.key ? null : btn.dataset.key; render();
       const el = document.getElementById("log-kg"); if (el && !el.value) el.focus();
@@ -614,7 +658,7 @@
     }
   });
 
-  window.addEventListener("hashchange", () => { state.openComposer = null; state.openSkip = null; state.finishing = null; state.openLog = null; render(); window.scrollTo(0, 0); });
+  window.addEventListener("hashchange", () => { state.openComposer = null; state.openSkip = null; state.finishing = null; state.openLog = null; state.openMax = null; render(); window.scrollTo(0, 0); });
 
   async function loadSessions() {
     const idx = await fetch("sessions/index.json", { cache: "no-cache" }).then((r) => r.json());
@@ -626,7 +670,7 @@
     state.me = email; state.loaded = false; render();
     try {
       await store.start((data) => {
-        state.ticks = data.ticks; state.notes = data.notes; state.finishes = data.finishes || {};
+        state.ticks = data.ticks; state.notes = data.notes; state.finishes = data.finishes || {}; state.maxes = data.maxes || {};
         if (state.sessions.length) state.loaded = true;
         scheduleRender();
       });
