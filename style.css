@@ -179,3 +179,13 @@ li.log-row{display:block;padding:10px 14px 14px;background:var(--bg)}
 .hist th{text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;padding:4px 4px 4px 0}
 .hist td{padding:4px 4px 4px 0;border-top:1px solid var(--line)}
 .hist tr.pr-row td{color:var(--accent);font-weight:600}
+/* big weight box beside the tick */
+li.step-row{grid-template-columns:30px 1fr 84px 44px}
+.kg-box{position:relative;display:block;width:84px;height:52px}
+.kg-input{width:100%;height:100%;box-sizing:border-box;border:2px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font:700 22px var(--display);text-align:center;padding:0 22px 0 6px;font-variant-numeric:tabular-nums;-moz-appearance:textfield}
+.kg-input::-webkit-outer-spin-button,.kg-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.kg-input::placeholder{color:var(--muted);opacity:.55;font-weight:600}
+.kg-input:focus{outline:none;border-color:var(--accent)}
+.kg-box span{position:absolute;right:8px;bottom:6px;font-size:11px;font-weight:600;color:var(--muted);pointer-events:none}
+.kg-box.filled .kg-input{border-color:var(--done);background:var(--done-soft)}
+@media (max-width:360px){li.step-row{grid-template-columns:26px 1fr 72px 40px;gap:8px}.kg-box{width:72px}}

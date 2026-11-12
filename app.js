@@ -97,6 +97,29 @@
     } else if (ex.suggestKg) bits.push(`Suggested: <b>${esc(ex.suggestKg)} kg</b>`);
     return bits.length ? `<div class="lift-line">${bits.join(" · ")}</div>` : "";
   }
+  // Planned weight for a set. A weight typed earlier in this session carries forward:
+  // the same kg each set, or scaled when the exercise has a % of 1RM per set (pcts).
+  // Before anything is typed: % of est. 1RM if the session gives one, else the last weight used.
+  function pctFor(ex, r) {
+    if (Array.isArray(ex.pcts) && ex.pcts.length) return ex.pcts[Math.min(r, ex.pcts.length) - 1];
+    return ex.pct || null;
+  }
+  const to2_5 = (x) => Math.round(x / 2.5) * 2.5;
+  function plannedKg(s, ex, r) {
+    const t = state.ticks[tickId(s.id, ex.id)];
+    for (let r0 = r - 1; r0 >= 1; r0--) {
+      const v = setInfo(t && t.sets && t.sets[r0]);
+      if (v && v.kg) {
+        const p0 = pctFor(ex, r0), p1 = pctFor(ex, r);
+        return p0 && p1 && p0 !== p1 ? to2_5((v.kg * p1) / p0) : +v.kg;
+      }
+    }
+    const L = liftHistory()[liftKey(ex.name)];
+    const p = pctFor(ex, r);
+    if (p && L && L.best) return to2_5(L.best.e1rm * p);
+    if (ex.suggestKg) return +ex.suggestKg;
+    return L && L.last ? L.last.kg : "";
+  }
   function lastKg(ex) { const L = liftHistory()[liftKey(ex.name)]; return L && L.last ? L.last.kg : ""; }
 
   // The day most sets were ticked on (the viewer's local date), e.g. "2026-11-13".
@@ -229,9 +252,10 @@
       const roundsN = Math.max(0, ...active.map((ex) => ex.sets || 1));
       const lifts = liftHistory();
       html += `<section class="block"><div class="block-head"><span class="letter">${esc(b.key)}</span><h3>${esc(b.name)}</h3>${roundsN ? `<span class="rounds">${roundsN} ${circuit ? "round" : "set"}${roundsN > 1 ? "s" : ""}</span>` : ""}</div>`;
+      let setsHtml = "";
       if (active.length) {
-        html += circuit ? `<div class="how">Do one set of each exercise in order, then start the next round. Tap an exercise to log reps and weight.</div>` : `<div class="how">Tap a set to log reps and weight.</div>`;
-        html += `<div class="round-grid">`;
+        setsHtml += circuit ? `<div class="how">Do one set of each exercise in order, then start the next round. Type the weight in the box to tick it off, or tap the circle. Tap an exercise to change reps.</div>` : `<div class="how">Type the weight in the box to tick off the set, or tap the circle. Tap a set to change reps.</div>`;
+        setsHtml += `<div class="round-grid">`;
         for (let r = 1; r <= roundsN; r++) {
           let rows = "", doneInRound = 0, inRound = 0;
           active.forEach((ex, idx) => {
@@ -246,14 +270,16 @@
             const logKey = s.id + "|" + ex.id + "|" + r;
             const L = lifts[liftKey(ex.name)];
             const thisSet = L && L.sets.find((x) => x.session.id === s.id && x.ex.id === ex.id && x.round === r);
+            const planned = plannedKg(s, ex, r);
             const logged = info && (info.reps || info.kg) ? `${info.reps ? esc(info.reps) + " reps" : ""}${info.reps && info.kg ? " × " : ""}${info.kg ? esc(info.kg) + " kg" : ""}` : "";
             rows += `<li class="step-row${on ? " on" : ""}${isNext ? " is-next" : ""}">
               <span class="step-num">${esc(label)}</span>
               <button class="step-main" data-act="open-log" data-key="${esc(logKey)}" aria-label="Log reps and weight for ${esc(ex.name)}, ${circuit ? "round" : "set"} ${r}">
                 <span class="step-name">${circuit ? esc(ex.name) : "Set " + r}${isNext ? ` <span class="up-next">Up next</span>` : ""}</span>
-                <span class="step-log">${logged ? logged : `<span class="step-target-inline">${esc(ex.target || "")}</span> · <span class="log-hint">Log</span>`}${thisSet && thisSet.pr ? ` <span class="pr">New best</span>` : ""}</span>
+                <span class="step-log">${info && info.reps ? esc(info.reps) + " reps" : `<span class="step-target-inline">${esc(ex.target || "")}</span>`}${pctFor(ex, r) ? ` · ${Math.round(pctFor(ex, r) * 100)}%` : ""}${thisSet && thisSet.pr ? ` <span class="pr">New best</span>` : ""}</span>
               </button>
-              <button class="step-check" data-act="tick" data-sid="${esc(s.id)}" data-eid="${esc(ex.id)}" data-set="${r}" aria-pressed="${on}" aria-label="Mark ${esc(ex.name)} ${circuit ? "round" : "set"} ${r} done">${on ? "✓" : ""}</button>
+              <label class="kg-box${info && info.kg ? " filled" : ""}"><input id="kg-${esc(s.id)}-${esc(ex.id)}-${r}" class="kg-input" type="number" inputmode="decimal" min="0" max="999" step="0.5" value="${info && info.kg ? esc(info.kg) : ""}" placeholder="${esc(planned)}" data-sid="${esc(s.id)}" data-eid="${esc(ex.id)}" data-set="${r}" aria-label="Weight in kg for ${esc(ex.name)}, ${circuit ? "round" : "set"} ${r}"><span>kg</span></label>
+              <button class="step-check" data-act="tick" data-sid="${esc(s.id)}" data-eid="${esc(ex.id)}" data-set="${r}" data-planned="${esc(planned)}" aria-pressed="${on}" aria-label="Mark ${esc(ex.name)} ${circuit ? "round" : "set"} ${r} done">${on ? "✓" : ""}</button>
             </li>`;
             if (state.openLog === logKey) {
               const reps = info && info.reps ? info.reps : targetReps(ex);
@@ -266,11 +292,12 @@
             }
           });
           const roundDone = inRound && doneInRound === inRound;
-          if (circuit) html += `<div class="round${roundDone ? " done" : ""}"><div class="round-label">Round ${r}<span>${roundDone ? "Done ✓" : `${doneInRound}/${inRound}`}</span></div><ol>${rows}</ol></div>`;
-          else html += `<div class="round single${roundDone ? " done" : ""}"><ol>${rows}</ol></div>`;
+          if (circuit) setsHtml += `<div class="round${roundDone ? " done" : ""}"><div class="round-label">Round ${r}<span>${roundDone ? "Done ✓" : `${doneInRound}/${inRound}`}</span></div><ol>${rows}</ol></div>`;
+          else setsHtml += `<div class="round single${roundDone ? " done" : ""}"><ol>${rows}</ol></div>`;
         }
-        html += `</div><div class="how sub">${circuit ? "Exercise details" : "Details"}</div>`;
+        setsHtml += `</div>`;
       }
+      if (setsHtml) html += `<div class="how sub">Exercise details</div>`;
       html += `<div class="exlist">`;
       for (const ex of b.exercises || []) {
         const e = exState(s, ex);
@@ -302,7 +329,7 @@
           ${state.openComposer === key ? composerHTML(key) : ""}
         </article>`;
       }
-      html += `</div></section>`;
+      html += `</div>${setsHtml ? `<div class="how sub">${circuit ? "Rounds" : "Sets"}</div>` + setsHtml : ""}</section>`;
     }
     const fin = state.finishes[s.id];
     const admin = cfg.adminName || "John";
@@ -377,6 +404,8 @@
   function render() {
     const openTA = state.openComposer ? document.getElementById("note-" + state.openComposer) : null;
     const keep = openTA ? { val: openTA.value, focused: document.activeElement === openTA, pos: openTA.selectionStart } : null;
+    const ae = document.activeElement;
+    const keepInput = ae && ae.classList && ae.classList.contains("kg-input") ? { id: ae.id, val: ae.value } : null;
 
     const view = currentView();
     renderTabs(view);
@@ -391,11 +420,49 @@
     else html = `<div class="empty"><strong>No sessions yet</strong><span>Add a session file to the sessions folder and it appears here.</span></div>`;
     app.innerHTML = html;
 
+    if (keepInput) {
+      const el = document.getElementById(keepInput.id);
+      if (el) { el.value = keepInput.val; el.focus(); }
+    }
     if (keep) {
       const el = document.getElementById("note-" + state.openComposer);
       if (el) { el.value = keep.val; if (keep.focused) { el.focus(); try { el.setSelectionRange(keep.pos, keep.pos); } catch (e) {} } }
     }
   }
+
+  async function persistTick(sid, eid, patch) {
+    const id = tickId(sid, eid);
+    const prev = state.ticks[id] || { sets: {} };
+    const next = Object.assign({ session: sid, ex: eid, sets: {}, skipped: false, skipReason: "" }, prev, patch, { by: state.me, at: new Date().toISOString() });
+    state.ticks[id] = next; scheduleRender();
+    try { await store.saveTick(sid, eid, next); } catch (e) { state.ticks[id] = prev; scheduleRender(); writeFailed(e); }
+  }
+  function findEx(sid, eid) {
+    const s = state.sessions.find((x) => x.id === sid);
+    if (s) for (const b of s.blocks) for (const ex of b.exercises) if (ex.id === eid) return ex;
+    return null;
+  }
+  // Typing a weight saves it and ticks the set.
+  app.addEventListener("change", async (ev) => {
+    const el = ev.target;
+    if (!el.classList || !el.classList.contains("kg-input")) return;
+    const { sid, eid } = el.dataset; const set = +el.dataset.set;
+    const kg = parseFloat(el.value);
+    const prev = state.ticks[tickId(sid, eid)] || {};
+    const sets = Object.assign({}, prev.sets || {});
+    const old = setInfo(sets[set]) || {};
+    if (kg > 0) {
+      const ex = findEx(sid, eid);
+      sets[set] = Object.assign({}, old, { at: old.at || new Date().toISOString(), kg });
+      if (!sets[set].reps && ex && targetReps(ex)) sets[set].reps = targetReps(ex);
+    } else if (sets[set]) {
+      const copy = Object.assign({}, old); delete copy.kg; sets[set] = copy;
+    } else return;
+    await persistTick(sid, eid, { sets });
+  });
+  app.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" && ev.target.classList && ev.target.classList.contains("kg-input")) ev.target.blur();
+  });
 
   let queued = false;
   function scheduleRender() { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; render(); }); }
@@ -453,18 +520,19 @@
     const act = btn.dataset.act;
     if (act !== "del") state.confirmDelete = null;
 
-    const saveTick = async (sid, eid, patch) => {
-      const id = tickId(sid, eid);
-      const prev = state.ticks[id] || { sets: {} };
-      const next = Object.assign({ session: sid, ex: eid, sets: {}, skipped: false, skipReason: "" }, prev, patch, { by: state.me, at: new Date().toISOString() });
-      state.ticks[id] = next; scheduleRender();
-      try { await store.saveTick(sid, eid, next); } catch (e) { state.ticks[id] = prev; scheduleRender(); writeFailed(e); }
-    };
+    const saveTick = persistTick;
     if (act === "tick") {
       const { sid, eid } = btn.dataset; const set = +btn.dataset.set;
       const prev = state.ticks[tickId(sid, eid)] || {};
       const sets = Object.assign({}, prev.sets || {});
-      if (sets[set]) delete sets[set]; else sets[set] = { at: new Date().toISOString() };
+      if (sets[set]) delete sets[set];
+      else {
+        sets[set] = { at: new Date().toISOString() };
+        const ex = findEx(sid, eid);
+        const planned = parseFloat(btn.dataset.planned);
+        if (planned > 0) sets[set].kg = planned;
+        if (ex && targetReps(ex)) sets[set].reps = targetReps(ex);
+      }
       await saveTick(sid, eid, { sets });
     } else if (act === "open-log") {
       state.openLog = state.openLog === btn.dataset.key ? null : btn.dataset.key; render();
