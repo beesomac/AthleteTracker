@@ -6,7 +6,7 @@
   const tickId = window.TrainingStore.tickKey;
 
   const state = {
-    me: null, sessions: [], ticks: {}, notes: [], finishes: {}, openSkip: null, finishing: null,
+    me: null, sessions: [], ticks: {}, notes: [], finishes: {}, openSkip: null, finishing: null, openLog: null,
     loaded: false, error: null, login: { sent: false, sending: false, error: null },
     openComposer: null, reviewFilter: "open", confirmDelete: null,
   };
@@ -46,6 +46,59 @@
     }
     return { total, done, skipped };
   }
+  // A set is stored as an ISO time (old) or {at, reps, kg}.
+  function setInfo(v) {
+    if (!v) return null;
+    if (typeof v === "string") return { at: v };
+    if (v === true) return { at: null };
+    return v;
+  }
+  function targetReps(ex) { const m = /^(\d+)/.exec(ex.target || ""); return m ? +m[1] : ""; }
+  const liftKey = (name) => String(name).toLowerCase().replace(/\(.*?\)/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+  // Epley estimate. Only trusted up to 12 reps; above that it's too rough to call a 1RM.
+  function est1RM(kg, reps) { if (!kg || !reps || reps > 12) return null; return reps === 1 ? kg : kg * (1 + reps / 30); }
+  const round1 = (x) => Math.round(x * 10) / 10;
+  // Every logged set across all sessions, grouped by lift name.
+  function liftHistory() {
+    const lifts = {};
+    for (const s of state.sessions) for (const b of s.blocks || []) for (const ex of b.exercises || []) {
+      const t = state.ticks[tickId(s.id, ex.id)];
+      if (!t || !t.sets) continue;
+      for (const r in t.sets) {
+        const v = setInfo(t.sets[r]);
+        if (!v || !v.kg) continue;
+        const k = liftKey(ex.name);
+        const L = lifts[k] || (lifts[k] = { name: ex.name, sets: [] });
+        L.sets.push({ session: s, ex, round: +r, kg: +v.kg, reps: +v.reps || 0, at: v.at || t.at, e1rm: est1RM(+v.kg, +v.reps) });
+      }
+    }
+    for (const k in lifts) {
+      const L = lifts[k];
+      L.sets.sort((a, b) => ((a.at || "") < (b.at || "") ? -1 : 1));
+      let best = null, heaviest = null;
+      for (const x of L.sets) {
+        x.pr = !!(x.e1rm && best && x.e1rm > best.e1rm + 0.01);
+        if (x.e1rm && (!best || x.e1rm > best.e1rm)) best = x;
+        if (!heaviest || x.kg > heaviest.kg) heaviest = x;
+      }
+      L.best = best; L.heaviest = heaviest; L.last = L.sets[L.sets.length - 1];
+    }
+    return lifts;
+  }
+  // Best so far for this lift, and a suggested weight when the session gives a % of 1RM.
+  function liftLine(ex) {
+    const L = liftHistory()[liftKey(ex.name)];
+    const bits = [];
+    if (L && L.best) bits.push(`Best: ${L.best.reps} × ${L.best.kg} kg · est. 1RM <b>${round1(L.best.e1rm)} kg</b>`);
+    else if (L && L.heaviest) bits.push(`Heaviest: ${L.heaviest.kg} kg`);
+    if (ex.pct && L && L.best) {
+      const kg = Math.round((L.best.e1rm * ex.pct) / 2.5) * 2.5;
+      bits.push(`Suggested: <b>${kg} kg</b> (${Math.round(ex.pct * 100)}% of 1RM)`);
+    } else if (ex.suggestKg) bits.push(`Suggested: <b>${esc(ex.suggestKg)} kg</b>`);
+    return bits.length ? `<div class="lift-line">${bits.join(" · ")}</div>` : "";
+  }
+  function lastKg(ex) { const L = liftHistory()[liftKey(ex.name)]; return L && L.last ? L.last.kg : ""; }
+
   // The day most sets were ticked on (the viewer's local date), e.g. "2026-11-13".
   function localDay(iso) { const d = new Date(iso); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
   function doneDay(s) {
@@ -55,7 +108,8 @@
       if (!t || !t.sets) continue;
       for (const k in t.sets) {
         const v = t.sets[k];
-        const iso = typeof v === "string" ? v : (v ? t.at : null);
+        const info = setInfo(v);
+        const iso = info ? (info.at || t.at) : null;
         if (iso) { const d = localDay(iso); counts[d] = (counts[d] || 0) + 1; }
       }
     }
@@ -96,6 +150,7 @@
   function currentView() {
     const h = (location.hash || "").slice(1);
     if (h === "notes") return { kind: "notes" };
+    if (h === "records") return { kind: "records" };
     if (h.startsWith("session-")) { const id = h.slice(8); if (state.sessions.find((s) => s.id === id)) return { kind: "session", id }; }
     const latest = state.sessions[state.sessions.length - 1];
     return latest ? { kind: "session", id: latest.id } : { kind: "none" };
@@ -114,6 +169,7 @@
       return `<a href="#session-${esc(s.id)}" ${cur ? 'aria-current="page"' : ""}>${esc(s.short || "Session " + (i + 1))} · ${esc(fmtDate(sessionDay(s)))}${finished ? " ✓" : ""}</a>`;
     });
     const n = openNotes().length;
+ parts.push(`<a href="#records" ${view.kind === "records" ? 'aria-current="page"' : ""}>Records</a>`);
     parts.push(`<a href="#notes" ${view.kind === "notes" ? 'aria-current="page"' : ""}>Notes to review${n ? ` <span class="count">${n}</span>` : ""}</a>`);
     tabs.innerHTML = parts.join("");
     const cur = tabs.querySelector('[aria-current="page"]');
@@ -171,36 +227,54 @@
       const active = (b.exercises || []).filter((ex) => ex.status !== "hold");
       const circuit = active.length > 1;
       const roundsN = Math.max(0, ...active.map((ex) => ex.sets || 1));
-      html += `<section class="block"><div class="block-head"><span class="letter">${esc(b.key)}</span><h3>${esc(b.name)}</h3>${roundsN ? `<span class="rounds">${roundsN} round${roundsN > 1 ? "s" : ""}</span>` : ""}</div>`;
-      if (circuit) {
-        html += `<div class="how">Do one set of each exercise in order, then start the next round.</div><div class="round-grid">`;
+      const lifts = liftHistory();
+      html += `<section class="block"><div class="block-head"><span class="letter">${esc(b.key)}</span><h3>${esc(b.name)}</h3>${roundsN ? `<span class="rounds">${roundsN} ${circuit ? "round" : "set"}${roundsN > 1 ? "s" : ""}</span>` : ""}</div>`;
+      if (active.length) {
+        html += circuit ? `<div class="how">Do one set of each exercise in order, then start the next round. Tap an exercise to log reps and weight.</div>` : `<div class="how">Tap a set to log reps and weight.</div>`;
+        html += `<div class="round-grid">`;
         for (let r = 1; r <= roundsN; r++) {
           let rows = "", doneInRound = 0, inRound = 0;
           active.forEach((ex, idx) => {
             if (r > (ex.sets || 1)) return;
             const e = exState(s, ex);
-            const label = b.key + (idx + 1);
+            const label = circuit ? b.key + (idx + 1) : String(r);
             if (e.skipped) { rows += `<li class="step skipped"><span class="step-num">${esc(label)}</span><span class="step-name">${esc(ex.name)}</span><span class="step-target">Skipped</span><span class="step-check" aria-hidden="true">–</span></li>`; return; }
             inRound++;
-            const on = !!(e.t.sets && e.t.sets[r]); if (on) doneInRound++;
+            const info = setInfo(e.t.sets && e.t.sets[r]);
+            const on = !!info; if (on) doneInRound++;
             const isNext = nextKey === ex.id + "#" + r;
-            rows += `<li><button class="step${on ? " on" : ""}${isNext ? " is-next" : ""}" data-act="tick" data-sid="${esc(s.id)}" data-eid="${esc(ex.id)}" data-set="${r}" aria-pressed="${on}" aria-label="Round ${r}: ${esc(ex.name)}, ${esc(ex.target || "")}">
-              <span class="step-inner"><span class="step-num">${esc(label)}</span><span class="step-name">${esc(ex.name)}${isNext ? ` <span class="up-next">Up next</span>` : ""}</span><span class="step-target">${esc(ex.target || "")}</span><span class="step-check" aria-hidden="true">${on ? "✓" : ""}</span></span></button></li>`;
+            const logKey = s.id + "|" + ex.id + "|" + r;
+            const L = lifts[liftKey(ex.name)];
+            const thisSet = L && L.sets.find((x) => x.session.id === s.id && x.ex.id === ex.id && x.round === r);
+            const logged = info && (info.reps || info.kg) ? `${info.reps ? esc(info.reps) + " reps" : ""}${info.reps && info.kg ? " × " : ""}${info.kg ? esc(info.kg) + " kg" : ""}` : "";
+            rows += `<li class="step-row${on ? " on" : ""}${isNext ? " is-next" : ""}">
+              <span class="step-num">${esc(label)}</span>
+              <button class="step-main" data-act="open-log" data-key="${esc(logKey)}" aria-label="Log reps and weight for ${esc(ex.name)}, ${circuit ? "round" : "set"} ${r}">
+                <span class="step-name">${circuit ? esc(ex.name) : "Set " + r}${isNext ? ` <span class="up-next">Up next</span>` : ""}</span>
+                <span class="step-log">${logged ? logged : `<span class="step-target-inline">${esc(ex.target || "")}</span> · <span class="log-hint">Log</span>`}${thisSet && thisSet.pr ? ` <span class="pr">New best</span>` : ""}</span>
+              </button>
+              <button class="step-check" data-act="tick" data-sid="${esc(s.id)}" data-eid="${esc(ex.id)}" data-set="${r}" aria-pressed="${on}" aria-label="Mark ${esc(ex.name)} ${circuit ? "round" : "set"} ${r} done">${on ? "✓" : ""}</button>
+            </li>`;
+            if (state.openLog === logKey) {
+              const reps = info && info.reps ? info.reps : targetReps(ex);
+              const kg = info && info.kg ? info.kg : lastKg(ex);
+              rows += `<li class="log-row"><form class="log-form" data-sid="${esc(s.id)}" data-eid="${esc(ex.id)}" data-set="${r}">
+                <label>Reps<input id="log-reps" type="number" inputmode="numeric" min="0" max="999" step="1" value="${esc(reps)}"></label>
+                <label>Weight (kg)<input id="log-kg" type="number" inputmode="decimal" min="0" max="999" step="0.5" value="${esc(kg)}" placeholder="bodyweight"></label>
+                <div class="row">${on ? `<button type="button" class="btn" data-act="clear-log" data-sid="${esc(s.id)}" data-eid="${esc(ex.id)}" data-set="${r}">Untick</button>` : ""}<button type="button" class="btn" data-act="cancel-log">Cancel</button><button type="submit" class="btn primary">Save${on ? "" : " & tick"}</button></div>
+              </form></li>`;
+            }
           });
           const roundDone = inRound && doneInRound === inRound;
-          html += `<div class="round${roundDone ? " done" : ""}"><div class="round-label">Round ${r}<span>${roundDone ? "Done ✓" : `${doneInRound}/${inRound}`}</span></div><ol>${rows}</ol></div>`;
+          if (circuit) html += `<div class="round${roundDone ? " done" : ""}"><div class="round-label">Round ${r}<span>${roundDone ? "Done ✓" : `${doneInRound}/${inRound}`}</span></div><ol>${rows}</ol></div>`;
+          else html += `<div class="round single${roundDone ? " done" : ""}"><ol>${rows}</ol></div>`;
         }
-        html += `</div><div class="how sub">Exercise details</div>`;
+        html += `</div><div class="how sub">${circuit ? "Exercise details" : "Details"}</div>`;
       }
       html += `<div class="exlist">`;
       for (const ex of b.exercises || []) {
         const e = exState(s, ex);
-        const t = e.t, sets = t.sets || {}, n = e.n, doneN = e.done;
-        let pips = "";
-        for (let i = 1; i <= n; i++) {
-          const on = !!sets[i];
-          pips += `<button class="pip${on ? " on" : ""}" data-act="tick" data-sid="${esc(s.id)}" data-eid="${esc(ex.id)}" data-set="${i}" aria-pressed="${on}" aria-label="${esc(ex.name)} set ${i}">${on ? "✓" : i}</button>`;
-        }
+        const t = e.t, n = e.n, doneN = e.done;
         const hold = ex.status === "hold";
         const skipped = !hold && e.skipped;
         const complete = !hold && !skipped && doneN === n;
@@ -212,8 +286,9 @@
           ${skipped && e.reason ? `<div class="skip-reason">Why: ${esc(e.reason)}</div>` : ""}
           ${ex.cue ? `<div class="cue">${esc(ex.cue)}</div>` : ""}
           ${ex.extra ? `<div class="extra">${esc(ex.extra)}</div>` : ""}
+          ${liftLine(ex)}
           <div class="ex-row">
-            ${hold ? `<span class="who-ticked">Not this session</span>` : skipped ? `<span class="who-ticked">Skipped by ${esc(nameOf(t.by))} · ${esc(fmtWhen(t.at))}</span>` : circuit ? `<span class="who-ticked">${doneN}/${n} rounds done</span>` : `<div class="pips">${pips}</div>`}
+            ${hold ? `<span class="who-ticked">Not this session</span>` : skipped ? `<span class="who-ticked">Skipped by ${esc(nameOf(t.by))} · ${esc(fmtWhen(t.at))}</span>` : `<span class="who-ticked">${doneN}/${n} ${circuit ? "rounds" : "sets"} done</span>`}
             <div class="tools">
               <a class="btn" href="${esc(ytLink(ex))}" target="_blank" rel="noopener">${ytIcon}${ex.video ? "Video" : "Examples"}</a>
               <button class="btn" data-act="open-note" data-key="${esc(key)}">${noteIcon}Note</button>
@@ -260,6 +335,24 @@
     return html;
   }
 
+  function renderRecords() {
+    const lifts = Object.values(liftHistory()).sort((a, b) => a.name.localeCompare(b.name));
+    let html = `<section class="hero"><div class="eyebrow">Across all sessions</div><h2>Records</h2>
+      <div class="extra">Estimated 1RM uses the Epley formula (weight × (1 + reps ÷ 30)) on sets of 12 reps or fewer. It's a guide for choosing weights, not a tested max.</div></section>`;
+    if (!lifts.length) return html + `<div class="empty"><strong>No weights logged yet</strong><span>Tap any set during a session to log reps and kg. Each lift's best shows up here.</span></div>`;
+    html += `<div class="records">`;
+    for (const L of lifts) {
+      const hist = L.sets.slice().reverse().slice(0, 6);
+      html += `<article class="record">
+        <div class="record-top"><div class="ex-name">${esc(L.name)}</div>${L.best ? `<div class="record-1rm"><span>est. 1RM</span>${round1(L.best.e1rm)} kg</div>` : ""}</div>
+        <div class="extra">${L.best ? `Best set ${L.best.reps} × ${L.best.kg} kg on ${esc(fmtDate(localDay(L.best.at)))}` : ""}${L.best && L.heaviest ? " · " : ""}${L.heaviest ? `Heaviest ${L.heaviest.kg} kg` : ""}</div>
+        <table class="hist"><thead><tr><th>Date</th><th>Set</th><th>Reps × kg</th><th>est. 1RM</th></tr></thead><tbody>
+        ${hist.map((x) => `<tr${x.pr ? ' class="pr-row"' : ""}><td>${esc(x.at ? fmtDate(localDay(x.at)) : "")}</td><td>${esc(x.session.short || "")} #${x.round}</td><td>${x.reps || "–"} × ${x.kg}</td><td>${x.e1rm ? round1(x.e1rm) + (x.pr ? " ★" : "") : "–"}</td></tr>`).join("")}
+        </tbody></table></article>`;
+    }
+    return html + `</div>`;
+  }
+
   function renderNotes() {
     const list = state.notes.filter((n) => state.reviewFilter === "all" || !n.reviewed).slice().sort((a, b) => (a.at < b.at ? 1 : -1));
     let html = `<section class="hero"><div class="eyebrow">Across all sessions</div><h2>Notes to review</h2>
@@ -293,6 +386,7 @@
     else if (!state.me) html = renderLogin();
     else if (!state.loaded) html = `<div class="hero"><div class="eyebrow">Loading sessions</div><h2>Getting today's work ready…</h2></div><div class="skeleton"></div><div class="skeleton"></div>`;
     else if (view.kind === "notes") html = renderNotes();
+    else if (view.kind === "records") html = renderRecords();
     else if (view.kind === "session") html = renderSession(state.sessions.find((s) => s.id === view.id));
     else html = `<div class="empty"><strong>No sessions yet</strong><span>Add a session file to the sessions folder and it appears here.</span></div>`;
     app.innerHTML = html;
@@ -316,6 +410,24 @@
   }
 
   app.addEventListener("submit", async (ev) => {
+    if (ev.target.classList.contains("log-form")) {
+      ev.preventDefault();
+      const f = ev.target; const { sid, eid } = f.dataset; const set = +f.dataset.set;
+      const reps = parseInt($("#log-reps").value, 10);
+      const kg = parseFloat($("#log-kg").value);
+      const prev = state.ticks[tickId(sid, eid)] || {};
+      const old = setInfo((prev.sets || {})[set]);
+      const sets = Object.assign({}, prev.sets || {});
+      sets[set] = { at: (old && old.at) || new Date().toISOString() };
+      if (reps > 0) sets[set].reps = reps;
+      if (kg > 0) sets[set].kg = kg;
+      state.openLog = null;
+      const id = tickId(sid, eid);
+      const next = Object.assign({ session: sid, ex: eid, sets: {}, skipped: false, skipReason: "" }, prev, { sets, by: state.me, at: new Date().toISOString() });
+      state.ticks[id] = next; scheduleRender();
+      try { await store.saveTick(sid, eid, next); } catch (e) { state.ticks[id] = prev; scheduleRender(); writeFailed(e); }
+      return;
+    }
     if (ev.target.id !== "login-form") return;
     ev.preventDefault();
     const email = $("#login-email").value.trim();
@@ -352,7 +464,18 @@
       const { sid, eid } = btn.dataset; const set = +btn.dataset.set;
       const prev = state.ticks[tickId(sid, eid)] || {};
       const sets = Object.assign({}, prev.sets || {});
-      if (sets[set]) delete sets[set]; else sets[set] = new Date().toISOString();
+      if (sets[set]) delete sets[set]; else sets[set] = { at: new Date().toISOString() };
+      await saveTick(sid, eid, { sets });
+    } else if (act === "open-log") {
+      state.openLog = state.openLog === btn.dataset.key ? null : btn.dataset.key; render();
+      const el = document.getElementById("log-kg"); if (el && !el.value) el.focus();
+    } else if (act === "cancel-log") {
+      state.openLog = null; render();
+    } else if (act === "clear-log") {
+      const { sid, eid } = btn.dataset; const set = +btn.dataset.set;
+      const prev = state.ticks[tickId(sid, eid)] || {};
+      const sets = Object.assign({}, prev.sets || {}); delete sets[set];
+      state.openLog = null;
       await saveTick(sid, eid, { sets });
     } else if (act === "open-skip") {
       state.openSkip = btn.dataset.key; render();
@@ -423,7 +546,7 @@
     }
   });
 
-  window.addEventListener("hashchange", () => { state.openComposer = null; state.openSkip = null; state.finishing = null; render(); window.scrollTo(0, 0); });
+  window.addEventListener("hashchange", () => { state.openComposer = null; state.openSkip = null; state.finishing = null; state.openLog = null; render(); window.scrollTo(0, 0); });
 
   async function loadSessions() {
     const idx = await fetch("sessions/index.json", { cache: "no-cache" }).then((r) => r.json());
