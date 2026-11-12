@@ -1,0 +1,82 @@
+/* Trainer console: same tokens and components as the athlete log (style.css), laid out wider for a desk. */
+body.console .wrap, body.console header.top .inner{max-width:1100px}
+body.console .hero h2{font-size:34px}
+body.console .hero .eyebrow a{color:inherit;text-decoration:none}
+body.console .hero .eyebrow a:hover{color:var(--ink)}
+nav.tabs a.out{margin-left:auto;border-style:dashed}
+
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-top:14px;display:grid;gap:10px;min-width:0}
+.card h3,.section-h{font-family:var(--display);font-weight:600;font-size:21px;margin:0;letter-spacing:.01em}
+.section-h{margin:18px 0 0}
+.card-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.callout{border-color:var(--info);background:var(--info-soft)}
+.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.toolbar .filter{margin:0}
+.toolbar .spacer{flex:1}
+.toolbar select,.filter-athlete{border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font:500 13px var(--body);padding:6px 8px}
+.btn.danger{color:var(--accent)}
+.chip.info{background:var(--info-soft);color:var(--info)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;overflow-wrap:anywhere}
+.banner.ok{background:var(--done-soft)}
+.banner.warn{background:var(--warn-soft)}
+.pre{white-space:pre-line}
+
+/* Tables collapse to labelled rows on a phone. */
+.table-card{padding:0;overflow:hidden}
+.table-card > h3{padding:14px 16px 0}
+table.grid{width:100%;border-collapse:collapse;font-size:14px}
+table.grid th{text-align:left;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600;padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.grid td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+table.grid tr:last-child td{border-bottom:0}
+table.grid td a{color:var(--ink)}
+table.grid tr.inactive td{opacity:.55}
+table.grid td.actions{text-align:right;white-space:nowrap}
+table.grid td.actions .btn{margin-left:4px}
+@media (max-width:760px){
+  table.grid thead{display:none}
+  table.grid, table.grid tbody, table.grid tr, table.grid td{display:block;width:100%}
+  table.grid tr{border-bottom:1px solid var(--line);padding:8px 0}
+  table.grid tr:last-child{border-bottom:0}
+  table.grid td{border:0;padding:3px 14px;display:flex;gap:10px;justify-content:space-between;align-items:baseline;text-align:right}
+  table.grid td::before{content:attr(data-l);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600;text-align:left;flex:0 0 auto}
+  table.grid td.actions{justify-content:flex-end;flex-wrap:wrap;gap:6px;padding-top:6px;white-space:normal}
+  table.grid td.actions .btn{margin:0}
+  table.grid td[colspan]{display:block;text-align:left}
+}
+
+/* Forms */
+.inline-form{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;align-items:end}
+.inline-form label,.fields label{display:grid;gap:4px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:600;color:var(--muted);min-width:0}
+.inline-form label.full,.inline-form .row{grid-column:1/-1}
+.inline-form label.wide{grid-column:span 2}
+@media (max-width:420px){.inline-form label.wide{grid-column:1/-1}}
+.inline-form input:not([type=checkbox]),.inline-form select,.inline-form textarea,.fields input:not([type=checkbox]):not([type=file]),.fields select{width:100%;border:1px solid var(--line);border-radius:8px;padding:9px 10px;font:500 15px var(--body);background:var(--surface);color:var(--ink)}
+.inline-form textarea{resize:vertical;font-weight:400}
+label.check{display:flex !important;align-items:center;gap:8px;text-transform:none !important;letter-spacing:0 !important;font-size:14px !important;color:var(--ink) !important;font-weight:500 !important;min-height:40px}
+.inline-form .row,.sticky-actions{display:flex;gap:8px;justify-content:flex-end}
+tr.editing td{background:var(--bg)}
+
+/* Program editor */
+.fields{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;align-items:end}
+.fields .wide{grid-column:span 2}
+@media (max-width:460px){.fields .wide{grid-column:1/-1}}
+label.file{position:relative;justify-content:center;min-height:40px;text-transform:none;letter-spacing:0;font-size:13px;color:var(--ink);display:inline-flex !important}
+label.file input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+.split > .card{margin-top:14px}
+@media (max-width:860px){.split{grid-template-columns:1fr}}
+#program-json{width:100%;min-height:440px;border:1px solid var(--line);border-radius:8px;padding:10px;font:12.5px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--bg);color:var(--ink);resize:vertical;tab-size:2}
+.problems{margin:0;padding:8px 10px 8px 28px;background:var(--accent-soft);border-radius:8px;font-size:13px;display:grid;gap:2px}
+.problems.warn{background:var(--warn-soft)}
+.ok{font-size:13px;color:var(--done);font-weight:600}
+.sticky-actions{position:sticky;bottom:0;background:linear-gradient(transparent,var(--bg) 30%);padding:18px 0 10px;margin-top:6px}
+.preview{display:grid;gap:12px}
+.pv-block .block-head{margin-bottom:4px}
+.pv-block ul{list-style:none;margin:0;padding:0;display:grid;gap:2px}
+.pv-block li{display:flex;justify-content:space-between;gap:10px;padding:5px 8px;border-radius:6px;font-size:14px}
+.pv-block li:nth-child(odd){background:var(--bg)}
+.pv-block li .extra{white-space:nowrap}
+
+/* Feedback replies */
+.reply-form{margin-top:4px}
+.reply-form label.check{min-height:auto;font-size:13px !important}

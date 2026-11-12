@@ -29,13 +29,47 @@
     let listener = null;
     let channel = null;
     let reloadTimer = null;
+    // v2 = the database has had supabase/004_trainer_console.sql run: members, roles, programs, WODs.
+    // Before that the site works as it always has (one athlete, sessions from the sessions/ files).
+    const info = { v2: false, role: null, name: null, athlete: null, athletes: [], names: {} };
+    const ATHLETE_KEY = "training-log-athlete";
+    // Rows in v2 belong to an athlete: the signed-in athlete, or whoever the trainer picked.
+    const scoped = (q) => (info.v2 && info.athlete ? q.eq("athlete_email", info.athlete) : q);
+    const mine = (row) => (info.v2 && info.athlete ? Object.assign({ athlete_email: info.athlete }, row) : row);
+
+    async function loadRoles() {
+      const w = await sb.rpc("whoami");
+      info.v2 = !w.error;
+      if (!info.v2) return;
+      const meRow = (w.data || [])[0] || {};
+      info.role = meRow.role || null;
+      info.name = meRow.display_name || null;
+      info.legacyFiles = !!meRow.legacy_files;
+      const n = await sb.rpc("member_names");
+      info.names = {};
+      if (!n.error) for (const r of n.data || []) if (r.email) info.names[r.email.toLowerCase()] = r.name;
+      if (info.role === "trainer") {
+        const m = await sb.from("members").select("email, display_name, role, active, legacy_files").eq("role", "athlete").eq("active", true).order("display_name");
+        info.athletes = (m.data || []).map((r) => ({ email: r.email, name: r.display_name || r.email.split("@")[0], legacyFiles: !!r.legacy_files }));
+        let saved = null;
+        try { saved = localStorage.getItem(ATHLETE_KEY); } catch (e) {}
+        const pick = info.athletes.find((a) => a.email === saved) || info.athletes[0];
+        info.athlete = pick ? pick.email : null;
+      } else {
+        info.athletes = [];
+        info.athlete = (email || "").toLowerCase();
+      }
+    }
 
     async function loadAll() {
-      const [t, n, f, m] = await Promise.all([
-        sb.from("ticks").select("*"),
-        sb.from("notes").select("*").order("created_at", { ascending: true }),
-        sb.from("session_finishes").select("*"),
-        sb.from("lift_maxes").select("*"),
+      const [t, n, f, m, p, w, b] = await Promise.all([
+        scoped(sb.from("ticks").select("*")),
+        scoped(sb.from("notes").select("*")).order("created_at", { ascending: true }),
+        scoped(sb.from("session_finishes").select("*")),
+        scoped(sb.from("lift_maxes").select("*")),
+        info.v2 ? sb.from("programs").select("*").eq("published", true).order("date") : null,
+        info.v2 ? sb.from("wods").select("*").order("created_at", { ascending: false }) : null,
+        info.v2 ? sb.rpc("wod_board") : null,
       ]);
       if (t.error) throw t.error;
       if (n.error) throw n.error;
@@ -46,7 +80,17 @@
       if (!f.error) for (const r of f.data) finishes[r.session_id] = fromFinishRow(r);
       const maxes = {};
       if (!m.error) for (const r of m.data) maxes[r.lift_key] = { lift: r.lift_key, name: r.lift_name, kg: r.kg, on: r.tested_on, by: r.updated_by_email };
-      return { ticks, notes: n.data.map(fromNoteRow), finishes, maxes };
+      // Programs for this athlete (their own, or for everyone). null = use the sessions/ files.
+      let programs = null;
+      if (p && !p.error) {
+        programs = p.data
+          .filter((r) => !r.athlete_email || r.athlete_email === info.athlete)
+          .map((r) => Object.assign({}, r.body || {}, { id: r.id, date: r.date, title: r.title }));
+      }
+      return {
+        ticks, notes: n.data.map(fromNoteRow), finishes, maxes, programs,
+        wods: w && !w.error ? w.data : [], board: b && !b.error ? b.data : [],
+      };
     }
     function scheduleReload() {
       clearTimeout(reloadTimer);
@@ -57,6 +101,12 @@
 
     return {
       mode: "shared",
+      info,
+      async setAthlete(addr) {
+        info.athlete = addr;
+        try { localStorage.setItem(ATHLETE_KEY, addr); } catch (e) {}
+        if (listener) listener(await loadAll());
+      },
       async currentUser() {
         const { data } = await sb.auth.getSession();
         email = data.session ? data.session.user.email : null;
@@ -84,6 +134,7 @@
         const allowed = await sb.rpc("am_i_allowed");
         if (allowed.error) throw allowed.error;
         if (!allowed.data) { const e = new Error("Email not on the allowed list"); e.code = "not_allowed"; throw e; }
+        await loadRoles();
         listener = onData;
         onData(await loadAll());
         if (channel) sb.removeChannel(channel);
@@ -91,42 +142,45 @@
           .on("postgres_changes", { event: "*", schema: "public", table: "ticks" }, scheduleReload)
           .on("postgres_changes", { event: "*", schema: "public", table: "notes" }, scheduleReload)
           .on("postgres_changes", { event: "*", schema: "public", table: "session_finishes" }, scheduleReload)
-          .on("postgres_changes", { event: "*", schema: "public", table: "lift_maxes" }, scheduleReload)
-          .subscribe();
+          .on("postgres_changes", { event: "*", schema: "public", table: "lift_maxes" }, scheduleReload);
+        if (info.v2) {
+          for (const table of ["programs", "wods", "wod_results"]) channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, scheduleReload);
+        }
+        channel = channel.subscribe();
         // Catch up when the phone wakes the tab back up.
         document.addEventListener("visibilitychange", () => { if (!document.hidden) scheduleReload(); });
       },
       async saveTick(sid, eid, t) {
-        const { error } = await sb.from("ticks").upsert({
+        const { error } = await sb.from("ticks").upsert(mine({
           session_id: sid, exercise_id: eid, sets: t.sets || {}, skipped: !!t.skipped, skip_reason: t.skipReason || null,
           updated_by_email: email, updated_at: new Date().toISOString(),
-        });
+        }), info.v2 ? { onConflict: "athlete_email,session_id,exercise_id" } : undefined);
         if (error) throw error;
       },
       async finishSession(sid, summary, details) {
-        const { error } = await sb.from("session_finishes").upsert({
+        const { error } = await sb.from("session_finishes").upsert(mine({
           session_id: sid, summary, details, finished_by_email: email, finished_at: new Date().toISOString(),
-        });
+        }), info.v2 ? { onConflict: "athlete_email,session_id" } : undefined);
         if (error) throw error;
       },
       async reopenSession(sid) {
-        const { error } = await sb.from("session_finishes").delete().eq("session_id", sid);
+        const { error } = await scoped(sb.from("session_finishes").delete().eq("session_id", sid));
         if (error) throw error;
       },
       async saveMax(key, name, kg, on) {
-        const { error } = await sb.from("lift_maxes").upsert({
+        const { error } = await sb.from("lift_maxes").upsert(mine({
           lift_key: key, lift_name: name, kg, tested_on: on, updated_by_email: email, updated_at: new Date().toISOString(),
-        });
+        }), info.v2 ? { onConflict: "athlete_email,lift_key" } : undefined);
         if (error) throw error;
       },
       async deleteMax(key) {
-        const { error } = await sb.from("lift_maxes").delete().eq("lift_key", key);
+        const { error } = await scoped(sb.from("lift_maxes").delete().eq("lift_key", key));
         if (error) throw error;
       },
       async addNote(n) {
-        const { data, error } = await sb.from("notes").insert({
+        const { data, error } = await sb.from("notes").insert(mine({
           session_id: n.session, exercise_id: n.ex, exercise_name: n.exName, body: n.text, author_email: email,
-        }).select().single();
+        })).select().single();
         if (error) throw error;
         return fromNoteRow(data);
       },
@@ -137,6 +191,16 @@
       async deleteNote(id) {
         const { error } = await sb.from("notes").delete().eq("id", id);
         if (error) throw error;
+      },
+      // An athlete logging their own WOD score.
+      async addResult(r) {
+        const { error } = await sb.from("wod_results").insert({
+          wod_id: r.wod, athlete_email: (email || "").toLowerCase(), score: r.score, rx: !!r.rx,
+          performed_on: r.on || undefined, note: r.note || null, entered_by_email: email,
+        });
+        if (error) throw error;
+        // The board is ranked in the database, so fetch it again rather than waiting for the live update.
+        if (listener) listener(await loadAll());
       },
     };
   }
@@ -155,6 +219,9 @@
     const emit = () => listener && listener(read());
     return {
       mode: "demo",
+      info: { v2: false, role: null, athletes: [], names: {} },
+      async setAthlete() {},
+      async addResult() {},
       async currentUser() { return me; },
       onAuthChange() {},
       async signIn() {},
@@ -199,4 +266,7 @@
 
   const configured = cfg.supabaseUrl && cfg.supabaseAnonKey && window.supabase;
   window.TrainingStore = { create: () => (configured ? supabaseStore() : localStore()), tickKey };
+  window.TrainingStore.createClient = () => (configured ? window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+  }) : null);
 })();
