@@ -201,3 +201,31 @@ li.step-row{grid-template-columns:30px 1fr 84px 44px}
 .max-form input{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:10px;font:600 16px var(--body);background:var(--surface);color:var(--ink)}
 .max-form .row{grid-column:1/-1;display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
 .max-form input{min-width:0;max-width:100%;-webkit-appearance:none;appearance:none;height:44px}
+/* guided mode */
+.guide{display:grid;gap:12px;padding-top:14px}
+.guide-top{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.guide-count{font-family:var(--display);font-weight:600;font-size:17px;color:var(--muted);font-variant-numeric:tabular-nums}
+.guide-bar{flex:none;width:100%}
+.guide-where{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--muted);letter-spacing:.02em}
+.guide-where .letter{font-family:var(--display);font-weight:700;font-size:13px;width:24px;height:24px;border-radius:6px;background:var(--ink);color:var(--surface);display:grid;place-items:center}
+.guide-card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;display:grid;gap:12px}
+.guide-card.is-done{border-color:var(--done)}
+.guide-head{display:flex;align-items:baseline;gap:10px}
+.guide-head .step-num{font-family:var(--display);font-weight:700;font-size:18px;color:var(--muted)}
+.guide-head h2{font-family:var(--display);font-weight:700;font-size:34px;line-height:1.05;margin:0;text-wrap:balance}
+.guide-target{font-family:var(--display);font-weight:600;font-size:22px;color:var(--muted)}
+.guide-form{display:grid;gap:10px;margin-top:4px}
+.stepper{display:grid;grid-template-columns:1fr 56px minmax(0,120px) 56px;align-items:center;gap:8px}
+.stepper-label{font-size:12px;letter-spacing:.08em;text-transform:uppercase;font-weight:600;color:var(--muted)}
+.stepper input{width:100%;box-sizing:border-box;height:60px;border:2px solid var(--line);border-radius:12px;text-align:center;font:700 28px var(--display);background:var(--surface);color:var(--ink);font-variant-numeric:tabular-nums;-moz-appearance:textfield;min-width:0}
+.stepper input::-webkit-outer-spin-button,.stepper input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.stepper input:focus{outline:none;border-color:var(--accent)}
+.step-btn{height:56px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font:600 26px var(--body);cursor:pointer}
+.guide-tools{flex-wrap:wrap}
+.guide-nav{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.guide-next{flex:1;text-align:center;font-size:13.5px;color:var(--muted);min-width:0}
+.guide-next b{color:var(--ink)}
+.guide-end{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px;display:grid;gap:12px;text-align:center}
+.guide-end h2{font-family:var(--display);font-size:34px;margin:0}
+.hero .btn.big{margin-top:4px}
+@media (max-width:360px){.stepper{grid-template-columns:1fr 48px minmax(0,96px) 48px}.guide-head h2{font-size:28px}}

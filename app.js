@@ -6,7 +6,7 @@
   const tickId = window.TrainingStore.tickKey;
 
   const state = {
-    me: null, sessions: [], ticks: {}, notes: [], finishes: {}, openSkip: null, finishing: null, openLog: null, maxes: {}, openMax: null,
+    me: null, sessions: [], ticks: {}, notes: [], finishes: {}, openSkip: null, finishing: null, openLog: null, maxes: {}, openMax: null, guide: null,
     loaded: false, error: null, login: { sent: false, sending: false, error: null },
     openComposer: null, reviewFilter: "open", confirmDelete: null,
   };
@@ -247,7 +247,87 @@
       <div class="row"><button class="btn" data-act="cancel-note">Cancel</button><button class="btn primary" data-act="save-note" data-key="${esc(key)}">Save note</button></div></div>`;
   }
 
+  // Guided mode: every set in the order it's done (block by block, round by round).
+  function guideSteps(s) {
+    const steps = [];
+    for (const b of s.blocks || []) {
+      const active = (b.exercises || []).filter((ex) => ex.status !== "hold" && !exState(s, ex).skipped);
+      const circuit = (b.exercises || []).filter((ex) => ex.status !== "hold").length > 1;
+      const rounds = Math.max(0, ...active.map((ex) => ex.sets || 1));
+      for (let r = 1; r <= rounds; r++) active.forEach((ex) => {
+        if (r <= (ex.sets || 1)) steps.push({ key: ex.id + "#" + r, b, ex, r, rounds, circuit });
+      });
+    }
+    return steps;
+  }
+  function stepDone(s, st) { const t = state.ticks[tickId(s.id, st.ex.id)]; return !!(t && t.sets && t.sets[st.r]); }
+
+  function renderGuide(s) {
+    const steps = guideSteps(s);
+    const g = state.guide;
+    let i = steps.findIndex((x) => x.key === g.key);
+    if (i < 0) { i = steps.findIndex((x) => !stepDone(s, x)); if (i < 0) i = steps.length; g.key = steps[i] ? steps[i].key : "end"; }
+    const doneCount = steps.filter((x) => stepDone(s, x)).length;
+    const pct = steps.length ? Math.round((doneCount / steps.length) * 100) : 0;
+    const top = `<div class="guide-top"><button class="btn" data-act="guide-exit">✕ Exit</button>
+      <div class="guide-count">${i < steps.length ? `Step ${i + 1} of ${steps.length}` : "All done"}</div></div>
+      <div class="bar guide-bar"><i style="width:${pct}%"></i></div>`;
+    if (i >= steps.length) {
+      return `<section class="guide">${top}<div class="guide-end"><h2>That's the lot</h2>
+        <p class="extra">${doneCount}/${steps.length} sets ticked. Finish the session to send ${esc(cfg.adminName || "John")} the summary.</p>
+        <button class="btn primary big" data-act="guide-finish" data-sid="${esc(s.id)}">Finish session</button>
+        ${steps.length ? `<button class="btn" data-act="guide-prev">‹ Back to last set</button>` : ""}</div></section>`;
+    }
+    const st = steps[i], ex = st.ex;
+    const t = state.ticks[tickId(s.id, ex.id)] || {};
+    const info = setInfo(t.sets && t.sets[st.r]);
+    const reps = info && info.reps ? info.reps : targetReps(ex);
+    const planned = plannedKg(s, ex, st.r);
+    const kg = info && info.kg ? info.kg : planned;
+    const p = pctFor(ex, st.r);
+    const nxt = steps[i + 1];
+    const key = s.id + "|" + ex.id;
+    const exNotes = state.notes.filter((x) => x.session === s.id && x.ex === ex.id);
+    const idx = (st.b.exercises || []).filter((x) => x.status !== "hold").indexOf(ex) + 1;
+    return `<section class="guide">${top}
+      <div class="guide-where"><span class="letter">${esc(st.b.key)}</span>${esc(st.b.name)} · ${st.circuit ? `Round ${st.r} of ${st.rounds}` : `Set ${st.r} of ${ex.sets || 1}`}</div>
+      <div class="guide-card${info ? " is-done" : ""}">
+        <div class="guide-head"><span class="step-num">${esc(st.b.key + (st.circuit ? idx : ""))}</span><h2>${esc(ex.name)}</h2></div>
+        <div class="guide-target">${esc(ex.target || "")}${p ? ` · ${Math.round(p * 100)}% of 1RM` : ""}${info ? ` <span class="chip back">Done</span>` : ""}</div>
+        ${ex.status && chipLabel[ex.status] ? `<div class="chips"><span class="chip ${esc(ex.status)}">${chipLabel[ex.status]}</span></div>` : ""}
+        ${ex.cue ? `<div class="cue">${esc(ex.cue)}</div>` : ""}
+        ${ex.extra ? `<div class="extra">${esc(ex.extra)}</div>` : ""}
+        ${liftLine(ex, s.id)}
+        <form class="guide-form" data-sid="${esc(s.id)}" data-eid="${esc(ex.id)}" data-set="${st.r}">
+          <div class="stepper"><span class="stepper-label">Reps</span>
+            <button type="button" class="step-btn" data-act="bump" data-field="guide-reps" data-delta="-1" aria-label="One less rep">−</button>
+            <input id="guide-reps" type="number" inputmode="numeric" min="0" max="999" step="1" value="${esc(reps)}">
+            <button type="button" class="step-btn" data-act="bump" data-field="guide-reps" data-delta="1" aria-label="One more rep">+</button></div>
+          <div class="stepper"><span class="stepper-label">Weight kg</span>
+            <button type="button" class="step-btn" data-act="bump" data-field="guide-kg" data-delta="-2.5" aria-label="2.5 kg less">−</button>
+            <input id="guide-kg" type="number" inputmode="decimal" min="0" max="999" step="0.5" value="${esc(kg)}" placeholder="none">
+            <button type="button" class="step-btn" data-act="bump" data-field="guide-kg" data-delta="2.5" aria-label="2.5 kg more">+</button></div>
+          <button type="submit" class="btn primary big">${info ? "Save · next" : "Done · next"}</button>
+          ${info ? `<button type="button" class="btn" data-act="guide-untick">Untick this set</button>` : ""}
+        </form>
+        <div class="tools guide-tools">
+          <a class="btn" href="${esc(ytLink(ex))}" target="_blank" rel="noopener">${ytIcon}${ex.video ? "Video" : "Examples"}</a>
+          <button class="btn" data-act="open-note" data-key="${esc(key)}">${noteIcon}Note</button>
+          <button class="btn" data-act="open-skip" data-key="${esc(key)}">${skipIcon}Skip exercise</button>
+        </div>
+        ${state.openSkip === key ? `<div class="composer"><input id="skip-${esc(key)}" class="skip-input" type="text" maxlength="200" placeholder="Why skip? e.g. ankle sore, no box, ran out of time (optional)">
+          <div class="row"><button class="btn" data-act="cancel-skip">Cancel</button><button class="btn primary" data-act="save-skip" data-sid="${esc(s.id)}" data-eid="${esc(ex.id)}">Skip all its sets</button></div></div>` : ""}
+        ${exNotes.length ? `<div class="notes">${exNotes.map((x) => noteHTML(x, false)).join("")}</div>` : ""}
+        ${state.openComposer === key ? composerHTML(key) : ""}
+      </div>
+      <div class="guide-nav"><button class="btn" data-act="guide-prev" ${i === 0 ? "disabled" : ""}>‹ Back</button>
+        <div class="guide-next">${nxt ? `Next: <b>${esc(nxt.ex.name)}</b>${nxt.r !== st.r || nxt.b !== st.b ? ` <span class="extra">(${nxt.b !== st.b ? esc(nxt.b.name) + ", " : ""}${nxt.circuit ? "round" : "set"} ${nxt.r})</span>` : ""}` : "Last one"}</div>
+        <button class="btn" data-act="guide-next" aria-label="Go to the next set without ticking this one">Next ›</button></div>
+    </section>`;
+  }
+
   function renderSession(s) {
+    if (state.guide && state.guide.sid === s.id) return renderGuide(s);
     const st = sessionStats(s);
     const pct = st.total ? Math.round((st.done / st.total) * 100) : 0;
     let html = `<section class="hero">
@@ -256,6 +336,7 @@
       <div class="meter"><div class="bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></div><b>${st.done}/${st.total} sets</b></div>
       ${st.skipped ? `<div class="extra">${st.skipped} exercise${st.skipped > 1 ? "s" : ""} skipped</div>` : ""}
       ${s.summary ? `<div class="status"><strong>Ankle check:</strong> ${esc(s.summary)}</div>` : ""}
+      <button class="btn primary big" data-act="guide-start" data-sid="${esc(s.id)}">${st.done ? "Continue guided workout" : "Start guided workout"}</button>
     </section>`;
     // The first unticked step, going block by block and round by round, is "up next".
     let nextKey = null;
@@ -501,6 +582,24 @@
   }
 
   app.addEventListener("submit", async (ev) => {
+    if (ev.target.classList.contains("guide-form")) {
+      ev.preventDefault();
+      const f = ev.target; const { sid, eid } = f.dataset; const set = +f.dataset.set;
+      const reps = parseInt($("#guide-reps").value, 10); const kg = parseFloat($("#guide-kg").value);
+      const prev = state.ticks[tickId(sid, eid)] || {};
+      const old = setInfo((prev.sets || {})[set]);
+      const sets = Object.assign({}, prev.sets || {});
+      sets[set] = { at: (old && old.at) || new Date().toISOString() };
+      if (reps > 0) sets[set].reps = reps;
+      if (kg > 0) sets[set].kg = kg;
+      // move on first so the next screen appears straight away
+      const s = state.sessions.find((x) => x.id === sid); const steps = guideSteps(s);
+      const i = steps.findIndex((x) => x.key === state.guide.key);
+      state.guide.key = steps[i + 1] ? steps[i + 1].key : "end"; state.openComposer = null; state.openSkip = null; state.openMax = null;
+      window.scrollTo(0, 0);
+      await persistTick(sid, eid, { sets });
+      return;
+    }
     if (ev.target.classList.contains("max-form")) {
       ev.preventDefault();
       const f = ev.target; const k = f.dataset.lift;
@@ -589,6 +688,31 @@
       const sets = Object.assign({}, prev.sets || {}); delete sets[set];
       state.openLog = null;
       await saveTick(sid, eid, { sets });
+    } else if (act === "guide-start") {
+      const s = state.sessions.find((x) => x.id === btn.dataset.sid); if (!s) return;
+      const steps = guideSteps(s); const first = steps.find((x) => !stepDone(s, x));
+      state.guide = { sid: s.id, key: first ? first.key : "end" }; state.openComposer = null; state.openSkip = null;
+      render(); window.scrollTo(0, 0);
+    } else if (act === "guide-exit") {
+      state.guide = null; render(); window.scrollTo(0, 0);
+    } else if (act === "guide-prev" || act === "guide-next") {
+      const s = state.sessions.find((x) => x.id === state.guide.sid); const steps = guideSteps(s);
+      let i = steps.findIndex((x) => x.key === state.guide.key); if (i < 0) i = steps.length;
+      i = act === "guide-prev" ? Math.max(0, i - 1) : i + 1;
+      state.guide.key = steps[i] ? steps[i].key : "end"; state.openComposer = null; state.openSkip = null; state.openMax = null;
+      render(); window.scrollTo(0, 0);
+    } else if (act === "guide-finish") {
+      state.guide = null; state.finishing = btn.dataset.sid; render();
+      const f = document.querySelector(".finish"); if (f) f.scrollIntoView({ block: "center" });
+    } else if (act === "guide-untick") {
+      const f = btn.closest("form"); const { sid, eid } = f.dataset; const set = +f.dataset.set;
+      const prev = state.ticks[tickId(sid, eid)] || {};
+      const sets = Object.assign({}, prev.sets || {}); delete sets[set];
+      await saveTick(sid, eid, { sets });
+    } else if (act === "bump") {
+      const el = document.getElementById(btn.dataset.field); if (!el) return;
+      const v = (parseFloat(el.value) || 0) + parseFloat(btn.dataset.delta);
+      el.value = Math.max(0, Math.round(v * 2) / 2);
     } else if (act === "open-skip") {
       state.openSkip = btn.dataset.key; render();
       const el = document.getElementById("skip-" + state.openSkip); if (el) el.focus();
@@ -658,7 +782,7 @@
     }
   });
 
-  window.addEventListener("hashchange", () => { state.openComposer = null; state.openSkip = null; state.finishing = null; state.openLog = null; state.openMax = null; render(); window.scrollTo(0, 0); });
+  window.addEventListener("hashchange", () => { state.openComposer = null; state.openSkip = null; state.finishing = null; state.openLog = null; state.openMax = null; state.guide = null; render(); window.scrollTo(0, 0); });
 
   async function loadSessions() {
     const idx = await fetch("sessions/index.json", { cache: "no-cache" }).then((r) => r.json());
