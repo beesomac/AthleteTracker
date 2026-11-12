@@ -1,0 +1,188 @@
+{
+ "id": "2026-11-12",
+ "date": "2026-11-12",
+ "short": "Session 2",
+ "title": "Speed & Power",
+ "planUrl": "https://claude.ai/artifact/EZ7o2VbjrKyAuTWhFKBPWK",
+ "summary": "Fully cleared and back running. Pogos are in, broad jumps still held (none in this session). Runs as written, with single-leg calf work added back because the session had none.",
+ "blocks": [
+  {
+   "key": "A",
+   "name": "Prep",
+   "rounds": "2 rounds",
+   "exercises": [
+    {
+     "id": "p1",
+     "name": "Bootstrap Squats",
+     "sets": 2,
+     "target": "10 reps",
+     "cue": "Heels down at the bottom; let the knees travel forward over the toes slowly. If the front of the injured ankle pinches, stop just short of it.",
+     "search": "bootstrap squat"
+    },
+    {
+     "id": "p2",
+     "name": "Iron Cross",
+     "sets": 2,
+     "target": "10 reps",
+     "search": "iron cross mobility drill"
+    },
+    {
+     "id": "p3",
+     "name": "Deadbug",
+     "sets": 2,
+     "target": "10 reps",
+     "search": "dead bug exercise"
+    },
+    {
+     "id": "p4",
+     "name": "Band Pull Apart",
+     "sets": 2,
+     "target": "15 reps"
+    },
+    {
+     "id": "p5",
+     "name": "Calf Raises (double then single leg)",
+     "sets": 2,
+     "target": "10 + 10",
+     "status": "new",
+     "cue": "Same primer as session 1, before pogos: 2×10 double-leg, then 2×10 single-leg on the injured side.",
+     "search": "single leg calf raise"
+    }
+   ]
+  },
+  {
+   "key": "B",
+   "name": "Speed",
+   "rounds": "3 rounds",
+   "exercises": [
+    {
+     "id": "sp1",
+     "name": "Pogo Jumps",
+     "sets": 3,
+     "target": "15 reps",
+     "cue": "Stiff ankles, quiet even landings. If session 1 pogos felt easy and even, push height a little.",
+     "search": "pogo jumps"
+    },
+    {
+     "id": "sp2",
+     "name": "Wall Drill – Double Switch",
+     "sets": 3,
+     "target": "10 reps",
+     "cue": "Drive off the ball of the foot, not the heel.",
+     "search": "wall drill double switch sprint"
+    },
+    {
+     "id": "sp3",
+     "name": "Box Jump",
+     "sets": 3,
+     "target": "4 reps",
+     "cue": "Jump up, step down (don't jump down). Land soft and level on the box. Up from 3×3 last time.",
+     "search": "box jump step down"
+    }
+   ]
+  },
+  {
+   "key": "C",
+   "name": "Primary Strength",
+   "exercises": [
+    {
+     "id": "ps1",
+     "name": "Trap Bar Deadlift",
+     "sets": 4,
+     "target": "6 reps",
+     "cue": "Push evenly through both feet; watch he isn't shifting weight off the injured side."
+    },
+    {
+     "id": "ps2",
+     "name": "BB Seal Row",
+     "sets": 3,
+     "target": "10 reps",
+     "search": "barbell seal row"
+    }
+   ]
+  },
+  {
+   "key": "D",
+   "name": "Secondary Strength",
+   "rounds": "3 rounds",
+   "exercises": [
+    {
+     "id": "ss1",
+     "name": "Half-kneeling Landmine Press",
+     "sets": 3,
+     "target": "10 / side",
+     "cue": "Kneeling on the good side puts the injured foot in front. Fine, just don't lean hard forward over it.",
+     "search": "half kneeling landmine press"
+    },
+    {
+     "id": "ss2",
+     "name": "DB Walking Lunges",
+     "sets": 3,
+     "target": "16 reps",
+     "status": "watch",
+     "cue": "Most ankle-demanding lift here. Controlled steps, front knee over the middle toes, no wobble on landing. If the injured side looks shaky, drop the dumbbells or switch to reverse lunges in place.",
+     "search": "dumbbell walking lunges"
+    }
+   ]
+  },
+  {
+   "key": "E",
+   "name": "Accessories",
+   "rounds": "3 rounds",
+   "exercises": [
+    {
+     "id": "ac1",
+     "name": "Push Up",
+     "sets": 3,
+     "target": "max reps",
+     "search": "push up proper form"
+    },
+    {
+     "id": "ac2",
+     "name": "Overhead Slam",
+     "sets": 3,
+     "target": "6 reps",
+     "cue": "Feet planted and square; no rotation on the slam.",
+     "search": "medicine ball overhead slam"
+    },
+    {
+     "id": "ac3",
+     "name": "Single-leg DB Calf Raise",
+     "sets": 3,
+     "target": "10 / side",
+     "status": "new",
+     "cue": "This session has no other calf work, which is the most useful thing for the ankle. Slow 3-second lower, full range.",
+     "search": "single leg dumbbell calf raise"
+    }
+   ]
+  },
+  {
+   "key": "F",
+   "name": "Resilience",
+   "rounds": "3 rounds",
+   "exercises": [
+    {
+     "id": "r1",
+     "name": "DB Farmers Carry",
+     "sets": 3,
+     "target": "30 m",
+     "cue": "Walk tall, normal heel-to-toe steps.",
+     "search": "dumbbell farmers carry"
+    },
+    {
+     "id": "r2",
+     "name": "Ab Mat Sit Ups",
+     "sets": 3,
+     "target": "15 reps",
+     "search": "ab mat sit up"
+    }
+   ]
+  }
+ ],
+ "next": [
+  "Pogos: 3×15 → 3×20, then forward/back and side-to-side, then single-leg.",
+  "Box jumps at 3×4 now. Next toward broad jumps: broad jump with a 2-second stuck landing, then full broad jumps.",
+  "Ready for broad jumps when pogos are easy and even, sprints pain-free, and about 25 single-leg calf raises on the injured side.",
+  "If walking lunges look solid, lateral lunges are a good next addition for side-to-side ankle control."
+ ]
+}

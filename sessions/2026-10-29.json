@@ -1,0 +1,176 @@
+{
+ "id": "2026-10-29",
+ "date": "2026-10-29",
+ "short": "Session 1",
+ "title": "Acceleration & Strength",
+ "planUrl": "https://claude.ai/artifact/EZ7o2VbjrKyAuTWhFKBPWK",
+ "summary": "Fully cleared and back running. Pogos are back in. Broad jumps are on hold for a later block, so they're swapped for box jumps. Calf work is the most useful thing for the ankle.",
+ "blocks": [
+  {
+   "key": "1",
+   "name": "Prep",
+   "exercises": [
+    {
+     "id": "p1",
+     "name": "Adductor Rock Backs",
+     "sets": 2,
+     "target": "10 / side"
+    },
+    {
+     "id": "p2",
+     "name": "World's Greatest Stretch",
+     "sets": 2,
+     "target": "5 / side",
+     "cue": "Injured side as front leg: let the knee drift forward over the toes slowly. If the front of the ankle pinches, stop short of it."
+    },
+    {
+     "id": "p3",
+     "name": "Calf Raises (double then single leg)",
+     "sets": 2,
+     "target": "10 + 10",
+     "status": "new",
+     "cue": "2×10 double-leg, then 2×10 single-leg on the injured side. Primes the calf before pogos. If single-leg reps are clearly worse than the good side, keep pogos easy.",
+     "search": "single leg calf raise"
+    }
+   ]
+  },
+  {
+   "key": "2",
+   "name": "Acceleration",
+   "exercises": [
+    {
+     "id": "a1",
+     "name": "Pogo Jumps",
+     "sets": 3,
+     "target": "15 reps",
+     "status": "back",
+     "cue": "Start low and quick (ankles stiff, heels just off the ground), then build height across sets. Land quietly, even left and right. Stop the set if he lands flat-footed or favours one side.",
+     "search": "pogo jumps"
+    },
+    {
+     "id": "a2",
+     "name": "Falling Start Accels",
+     "sets": 3,
+     "target": "10 m",
+     "cue": "Build from about 70% effort on the first rep, then go full.",
+     "search": "falling start acceleration sprint"
+    },
+    {
+     "id": "a3",
+     "name": "Box Jump (instead of Broad Jump)",
+     "sets": 3,
+     "target": "3 reps",
+     "status": "swap",
+     "cue": "Jump up, step down. Same power intent, no horizontal landing.",
+     "search": "box jump step down"
+    },
+    {
+     "id": "a4",
+     "name": "Broad Jump",
+     "sets": 3,
+     "target": "3 reps",
+     "status": "hold",
+     "cue": "Held for a later block. Comes back via box jumps, then broad jumps with a 2-second stuck landing.",
+     "search": "standing broad jump"
+    }
+   ]
+  },
+  {
+   "key": "3",
+   "name": "Primary Strength",
+   "exercises": [
+    {
+     "id": "ps1",
+     "name": "BB Box Squat",
+     "sets": 4,
+     "target": "8 reps",
+     "cue": "Weight even across both feet.",
+     "extra": "RPE 6, 6, 7, 7",
+     "search": "barbell box squat"
+    },
+    {
+     "id": "ps2",
+     "name": "Chin Ups",
+     "sets": 4,
+     "target": "6 reps",
+     "extra": "RPE 7 · prev 8 reps"
+    }
+   ]
+  },
+  {
+   "key": "4",
+   "name": "Secondary Strength",
+   "exercises": [
+    {
+     "id": "ss1",
+     "name": "DB Bulgarian Split Squat",
+     "sets": 3,
+     "target": "8 / leg",
+     "cue": "Injured leg as the front leg: control the knee travel forward rather than dropping into the bottom.",
+     "extra": "RPE 7 · prev 8 × 8 kg · best 10 × 15 kg",
+     "search": "dumbbell bulgarian split squat"
+    },
+    {
+     "id": "ss2",
+     "name": "DB Bench Press",
+     "sets": 3,
+     "target": "10 reps",
+     "extra": "RPE 7 · prev/best 8 × 22.5 kg",
+     "search": "dumbbell bench press"
+    }
+   ]
+  },
+  {
+   "key": "5",
+   "name": "Accessories",
+   "exercises": [
+    {
+     "id": "ac1",
+     "name": "KB Romanian Deadlift",
+     "sets": 3,
+     "target": "10 reps",
+     "extra": "RPE 7 · prev 12",
+     "search": "kettlebell romanian deadlift"
+    },
+    {
+     "id": "ac2",
+     "name": "DB Calf Raise (single leg)",
+     "sets": 3,
+     "target": "10 reps",
+     "status": "watch",
+     "cue": "The most useful exercise in the session for the ankle. Single-leg, slow 3-second lower, full range.",
+     "extra": "RPE 7 · can use a machine",
+     "search": "single leg dumbbell calf raise"
+    }
+   ]
+  },
+  {
+   "key": "6",
+   "name": "Resilience",
+   "exercises": [
+    {
+     "id": "r1",
+     "name": "Bent Knee Copenhagen Plank",
+     "sets": 3,
+     "target": "30 s / side",
+     "extra": "RPE 7",
+     "search": "bent knee copenhagen plank"
+    },
+    {
+     "id": "r2",
+     "name": "Split Stance Cable Pallof Press",
+     "sets": 3,
+     "target": "10 reps",
+     "cue": "Do sets with each leg in front.",
+     "extra": "RPE 7",
+     "search": "split stance pallof press"
+    }
+   ]
+  }
+ ],
+ "next": [
+  "Pogos: 15 → 20 reps, then forward/back and side-to-side pogos, then single-leg pogos.",
+  "Broad jumps: box jumps → broad jump with a 2-second stuck landing → full broad jumps.",
+  "Ready for broad jumps when pogos feel easy and even, sprints are pain-free, and he can do about 25 single-leg calf raises on the injured side."
+ ]
+}
