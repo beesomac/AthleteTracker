@@ -6,7 +6,13 @@
   function tickKey(sid, eid) { return sid + "__" + eid; }
 
   function fromTickRow(r) {
-    return { session: r.session_id, ex: r.exercise_id, sets: r.sets || {}, by: r.updated_by_email, at: r.updated_at };
+    return {
+      session: r.session_id, ex: r.exercise_id, sets: r.sets || {}, skipped: !!r.skipped, skipReason: r.skip_reason || "",
+      by: r.updated_by_email, at: r.updated_at,
+    };
+  }
+  function fromFinishRow(r) {
+    return { session: r.session_id, by: r.finished_by_email, at: r.finished_at, summary: r.summary, details: r.details || {} };
   }
   function fromNoteRow(r) {
     return {
@@ -25,15 +31,19 @@
     let reloadTimer = null;
 
     async function loadAll() {
-      const [t, n] = await Promise.all([
+      const [t, n, f] = await Promise.all([
         sb.from("ticks").select("*"),
         sb.from("notes").select("*").order("created_at", { ascending: true }),
+        sb.from("session_finishes").select("*"),
       ]);
       if (t.error) throw t.error;
       if (n.error) throw n.error;
       const ticks = {};
       for (const r of t.data) ticks[tickKey(r.session_id, r.exercise_id)] = fromTickRow(r);
-      return { ticks, notes: n.data.map(fromNoteRow) };
+      const finishes = {};
+      // Older databases without the finish table still work; finishing just won't save.
+      if (!f.error) for (const r of f.data) finishes[r.session_id] = fromFinishRow(r);
+      return { ticks, notes: n.data.map(fromNoteRow), finishes };
     }
     function scheduleReload() {
       clearTimeout(reloadTimer);
@@ -77,14 +87,26 @@
         channel = sb.channel("training-log")
           .on("postgres_changes", { event: "*", schema: "public", table: "ticks" }, scheduleReload)
           .on("postgres_changes", { event: "*", schema: "public", table: "notes" }, scheduleReload)
+          .on("postgres_changes", { event: "*", schema: "public", table: "session_finishes" }, scheduleReload)
           .subscribe();
         // Catch up when the phone wakes the tab back up.
         document.addEventListener("visibilitychange", () => { if (!document.hidden) scheduleReload(); });
       },
-      async setTick(sid, eid, sets) {
+      async saveTick(sid, eid, t) {
         const { error } = await sb.from("ticks").upsert({
-          session_id: sid, exercise_id: eid, sets, updated_by_email: email, updated_at: new Date().toISOString(),
+          session_id: sid, exercise_id: eid, sets: t.sets || {}, skipped: !!t.skipped, skip_reason: t.skipReason || null,
+          updated_by_email: email, updated_at: new Date().toISOString(),
         });
+        if (error) throw error;
+      },
+      async finishSession(sid, summary, details) {
+        const { error } = await sb.from("session_finishes").upsert({
+          session_id: sid, summary, details, finished_by_email: email, finished_at: new Date().toISOString(),
+        });
+        if (error) throw error;
+      },
+      async reopenSession(sid) {
+        const { error } = await sb.from("session_finishes").delete().eq("session_id", sid);
         if (error) throw error;
       },
       async addNote(n) {
@@ -109,8 +131,10 @@
     const KEY = "trae-training-log-demo";
     const me = "demo@this-device";
     function read() {
-      try { return JSON.parse(localStorage.getItem(KEY)) || { ticks: {}, notes: [] }; }
-      catch (e) { return { ticks: {}, notes: [] }; }
+      let d = null;
+      try { d = JSON.parse(localStorage.getItem(KEY)); } catch (e) {}
+      d = d || {};
+      return { ticks: d.ticks || {}, notes: d.notes || [], finishes: d.finishes || {} };
     }
     function write(d) { try { localStorage.setItem(KEY, JSON.stringify(d)); } catch (e) {} }
     let listener = null;
@@ -123,10 +147,18 @@
       async signInWithPassword() {},
       async signOut() {},
       async start(onData) { listener = onData; emit(); },
-      async setTick(sid, eid, sets) {
+      async saveTick(sid, eid, t) {
         const d = read();
-        d.ticks[tickKey(sid, eid)] = { session: sid, ex: eid, sets, by: me, at: new Date().toISOString() };
+        d.ticks[tickKey(sid, eid)] = { session: sid, ex: eid, sets: t.sets || {}, skipped: !!t.skipped, skipReason: t.skipReason || "", by: me, at: new Date().toISOString() };
         write(d);
+      },
+      async finishSession(sid, summary, details) {
+        const d = read();
+        d.finishes[sid] = { session: sid, by: me, at: new Date().toISOString(), summary, details };
+        write(d);
+      },
+      async reopenSession(sid) {
+        const d = read(); delete d.finishes[sid]; write(d);
       },
       async addNote(n) {
         const d = read();

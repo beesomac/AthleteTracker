@@ -112,3 +112,14 @@ a:focus-visible,button:focus-visible,textarea:focus-visible{outline:2px solid va
 .signout{background:none;border:0;color:var(--muted);font:12px var(--body);cursor:pointer;text-decoration:underline;padding:0}
 .demo{background:var(--warn-soft);font-size:12px;text-align:center;padding:4px 16px}
 .login .btn.primary{justify-content:center;padding-block:10px;font-size:15px}
+.chip.skip{background:var(--warn-soft);color:var(--warn)}
+.ex.skipped{border-style:dashed}
+.skip-reason{font-size:13.5px;color:var(--warn)}
+.skip-input{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:14px var(--body);background:var(--surface);color:var(--ink)}
+.finish{margin-top:28px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px;display:grid;gap:10px}
+.finish.done{border-color:var(--done);background:var(--done-soft)}
+.finish h3{font-family:var(--display);font-weight:600;font-size:22px;margin:0}
+.finish .row{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
+.report{display:grid;gap:8px;font-size:14px}
+.report ul{margin:4px 0 0;padding-left:18px;display:grid;gap:2px}
+.btn.big{width:100%;justify-content:center;padding-block:12px;font-size:16px;font-weight:600}

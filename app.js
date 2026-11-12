@@ -6,12 +6,13 @@
   const tickId = window.TrainingStore.tickKey;
 
   const state = {
-    me: null, sessions: [], ticks: {}, notes: [],
+    me: null, sessions: [], ticks: {}, notes: [], finishes: {}, openSkip: null, finishing: null,
     loaded: false, error: null, login: { sent: false, sending: false, error: null },
     openComposer: null, reviewFilter: "open", confirmDelete: null,
   };
 
   const ytIcon = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M23 7.2a3 3 0 0 0-2.1-2.1C19 4.6 12 4.6 12 4.6s-7 0-8.9.5A3 3 0 0 0 1 7.2 31 31 0 0 0 .5 12a31 31 0 0 0 .5 4.8 3 3 0 0 0 2.1 2.1c1.9.5 8.9.5 8.9.5s7 0 8.9-.5a3 3 0 0 0 2.1-2.1 31 31 0 0 0 .5-4.8 31 31 0 0 0-.5-4.8zM9.7 15.1V8.9l5.8 3.1-5.8 3.1z"/></svg>';
+  const skipIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 5l9 7-9 7zM18 5v14"/></svg>';
   const noteIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 5h16v11H8l-4 4z"/></svg>';
   const chipLabel = { new: "New", back: "Back in", swap: "Swap", hold: "On hold", watch: "Watch" };
 
@@ -27,15 +28,50 @@
     return key ? people[key] : String(email).split("@")[0];
   }
 
+  function exState(s, ex) {
+    const t = state.ticks[tickId(s.id, ex.id)] || {};
+    const n = ex.sets || 1;
+    let done = 0;
+    for (let i = 1; i <= n; i++) if (t.sets && t.sets[i]) done++;
+    return { t, n, done, skipped: !!t.skipped, reason: t.skipReason || "" };
+  }
+  // Skipped exercises drop out of the total, so a session with skips can still reach 100%.
   function sessionStats(s) {
-    let total = 0, done = 0;
+    let total = 0, done = 0, skipped = 0;
     for (const b of s.blocks || []) for (const ex of b.exercises || []) {
       if (ex.status === "hold") continue;
-      const n = ex.sets || 1; total += n;
-      const t = state.ticks[tickId(s.id, ex.id)];
-      if (t && t.sets) for (let i = 1; i <= n; i++) if (t.sets[i]) done++;
+      const e = exState(s, ex);
+      if (e.skipped) { skipped++; continue; }
+      total += e.n; done += e.done;
     }
-    return { total, done };
+    return { total, done, skipped };
+  }
+  function sessionReport(s) {
+    const st = sessionStats(s);
+    const skipped = [], missed = [], partial = [];
+    for (const b of s.blocks || []) for (const ex of b.exercises || []) {
+      if (ex.status === "hold") continue;
+      const e = exState(s, ex);
+      if (e.skipped) skipped.push({ name: ex.name, reason: e.reason });
+      else if (e.done === 0) missed.push({ name: ex.name });
+      else if (e.done < e.n) partial.push({ name: ex.name, done: e.done, of: e.n });
+    }
+    const who = nameOf(state.me) === "You" ? ((cfg.people || {})[state.me] || "Trae") : nameOf(state.me);
+    const lines = [`${who} finished ${s.title} (${s.short || s.date}): ${st.done}/${st.total} sets done.`];
+    if (skipped.length) lines.push("Skipped: " + skipped.map((x) => x.name + (x.reason ? ` (${x.reason})` : "")).join("; ") + ".");
+    if (partial.length) lines.push("Part done: " + partial.map((x) => `${x.name} ${x.done}/${x.of}`).join("; ") + ".");
+    if (missed.length) lines.push("Not done: " + missed.map((x) => x.name).join("; ") + ".");
+    if (!skipped.length && !partial.length && !missed.length) lines.push("Everything done.");
+    return { stats: st, skipped, partial, missed, text: lines.join("\n") };
+  }
+  function reportListHTML(r) {
+    const li = (arr, f) => arr.map((x) => `<li>${f(x)}</li>`).join("");
+    let h = "";
+    if (r.skipped.length) h += `<div><b>Skipped</b><ul>${li(r.skipped, (x) => esc(x.name) + (x.reason ? ` <span class="extra">(${esc(x.reason)})</span>` : ""))}</ul></div>`;
+    if (r.partial.length) h += `<div><b>Part done</b><ul>${li(r.partial, (x) => `${esc(x.name)} <span class="extra">${x.done}/${x.of} sets</span>`)}</ul></div>`;
+    if (r.missed.length) h += `<div><b>Not done</b><ul>${li(r.missed, (x) => esc(x.name))}</ul></div>`;
+    if (!h) h = `<div>Every set ticked. Nice work.</div>`;
+    return h;
   }
   const openNotes = () => state.notes.filter((n) => !n.reviewed);
 
@@ -52,7 +88,8 @@
     const parts = state.sessions.map((s, i) => {
       const st = sessionStats(s);
       const cur = view.kind === "session" && view.id === s.id;
-      return `<a href="#session-${esc(s.id)}" ${cur ? 'aria-current="page"' : ""}>${esc(s.short || "Session " + (i + 1))} · ${esc(fmtDate(s.date))}${st.total && st.done === st.total ? " ✓" : ""}</a>`;
+      const finished = !!state.finishes[s.id] || (st.total && st.done === st.total);
+      return `<a href="#session-${esc(s.id)}" ${cur ? 'aria-current="page"' : ""}>${esc(s.short || "Session " + (i + 1))} · ${esc(fmtDate(s.date))}${finished ? " ✓" : ""}</a>`;
     });
     const n = openNotes().length;
     parts.push(`<a href="#notes" ${view.kind === "notes" ? 'aria-current="page"' : ""}>Notes to review${n ? ` <span class="count">${n}</span>` : ""}</a>`);
@@ -94,41 +131,64 @@
       <div class="eyebrow">${esc(fmtDate(s.date))}${s.short ? " · " + esc(s.short) : ""}</div>
       <h2>${esc(s.title)}</h2>
       <div class="meter"><div class="bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></div><b>${st.done}/${st.total} sets</b></div>
+      ${st.skipped ? `<div class="extra">${st.skipped} exercise${st.skipped > 1 ? "s" : ""} skipped</div>` : ""}
       ${s.summary ? `<div class="status"><strong>Ankle check:</strong> ${esc(s.summary)}</div>` : ""}
     </section>`;
     for (const b of s.blocks || []) {
       html += `<section class="block"><div class="block-head"><span class="letter">${esc(b.key)}</span><h3>${esc(b.name)}</h3>${b.rounds ? `<span class="rounds">${esc(b.rounds)}</span>` : ""}</div><div class="exlist">`;
       for (const ex of b.exercises || []) {
-        const t = state.ticks[tickId(s.id, ex.id)] || {};
-        const sets = t.sets || {};
-        const n = ex.sets || 1;
-        let doneN = 0, pips = "";
+        const e = exState(s, ex);
+        const t = e.t, sets = t.sets || {}, n = e.n, doneN = e.done;
+        let pips = "";
         for (let i = 1; i <= n; i++) {
-          const on = !!sets[i]; if (on) doneN++;
+          const on = !!sets[i];
           pips += `<button class="pip${on ? " on" : ""}" data-act="tick" data-sid="${esc(s.id)}" data-eid="${esc(ex.id)}" data-set="${i}" aria-pressed="${on}" aria-label="${esc(ex.name)} set ${i}">${on ? "✓" : i}</button>`;
         }
         const hold = ex.status === "hold";
-        const complete = !hold && doneN === n;
+        const skipped = !hold && e.skipped;
+        const complete = !hold && !skipped && doneN === n;
         const exNotes = state.notes.filter((x) => x.session === s.id && x.ex === ex.id);
         const key = s.id + "|" + ex.id;
-        html += `<article class="ex${complete ? " complete" : ""}${hold ? " hold" : ""}">
+        html += `<article class="ex${complete ? " complete" : ""}${hold ? " hold" : ""}${skipped ? " skipped" : ""}">
           <div class="ex-top"><div class="ex-name">${esc(ex.name)}</div><div class="ex-target">${esc(ex.target || "")}</div></div>
-          ${ex.status && chipLabel[ex.status] ? `<div class="chips"><span class="chip ${esc(ex.status)}">${chipLabel[ex.status]}</span></div>` : ""}
+          ${(ex.status && chipLabel[ex.status]) || skipped ? `<div class="chips">${ex.status && chipLabel[ex.status] ? `<span class="chip ${esc(ex.status)}">${chipLabel[ex.status]}</span>` : ""}${skipped ? `<span class="chip skip">Skipped</span>` : ""}</div>` : ""}
+          ${skipped && e.reason ? `<div class="skip-reason">Why: ${esc(e.reason)}</div>` : ""}
           ${ex.cue ? `<div class="cue">${esc(ex.cue)}</div>` : ""}
           ${ex.extra ? `<div class="extra">${esc(ex.extra)}</div>` : ""}
           <div class="ex-row">
-            ${hold ? `<span class="who-ticked">Not this session</span>` : `<div class="pips">${pips}</div>`}
+            ${hold ? `<span class="who-ticked">Not this session</span>` : skipped ? `<span class="who-ticked">Skipped by ${esc(nameOf(t.by))} · ${esc(fmtWhen(t.at))}</span>` : `<div class="pips">${pips}</div>`}
             <div class="tools">
               <a class="btn" href="${esc(ytLink(ex))}" target="_blank" rel="noopener">${ytIcon}${ex.video ? "Video" : "Examples"}</a>
               <button class="btn" data-act="open-note" data-key="${esc(key)}">${noteIcon}Note</button>
+              ${hold ? "" : skipped ? `<button class="btn" data-act="unskip" data-sid="${esc(s.id)}" data-eid="${esc(ex.id)}">Undo skip</button>` : `<button class="btn" data-act="open-skip" data-key="${esc(key)}">${skipIcon}Skip</button>`}
             </div>
           </div>
-          ${t.by && doneN ? `<div class="who-ticked">Last ticked by ${esc(nameOf(t.by))} · ${esc(fmtWhen(t.at))}</div>` : ""}
+          ${state.openSkip === key ? `<div class="composer"><input id="skip-${esc(key)}" class="skip-input" type="text" maxlength="200" placeholder="Why skip? e.g. ankle sore, no box, ran out of time (optional)">
+            <div class="row"><button class="btn" data-act="cancel-skip">Cancel</button><button class="btn primary" data-act="save-skip" data-sid="${esc(s.id)}" data-eid="${esc(ex.id)}">Skip exercise</button></div></div>` : ""}
+          ${t.by && doneN && !skipped ? `<div class="who-ticked">Last ticked by ${esc(nameOf(t.by))} · ${esc(fmtWhen(t.at))}</div>` : ""}
           ${exNotes.length ? `<div class="notes">${exNotes.map((x) => noteHTML(x, false)).join("")}</div>` : ""}
           ${state.openComposer === key ? composerHTML(key) : ""}
         </article>`;
       }
       html += `</div></section>`;
+    }
+    const fin = state.finishes[s.id];
+    const admin = cfg.adminName || "John";
+    if (fin) {
+      const r = { skipped: (fin.details && fin.details.skipped) || [], partial: (fin.details && fin.details.partial) || [], missed: (fin.details && fin.details.missed) || [] };
+      html += `<section class="finish done"><h3>Session finished</h3>
+        <div class="extra">Finished by ${esc(nameOf(fin.by))} · ${esc(fmtWhen(fin.at))}</div>
+        <div class="report">${reportListHTML(r)}</div>
+        <div><button class="btn" data-act="reopen" data-sid="${esc(s.id)}">Reopen session</button></div></section>`;
+    } else if (state.finishing === s.id) {
+      const r = sessionReport(s);
+      html += `<section class="finish"><h3>Finish this session?</h3>
+        <div class="extra">${r.stats.done}/${r.stats.total} sets ticked. ${esc(admin)} gets a summary on his phone.</div>
+        <div class="report">${reportListHTML(r)}</div>
+        <div class="row"><button class="btn" data-act="cancel-finish">Keep going</button><button class="btn primary" data-act="confirm-finish" data-sid="${esc(s.id)}">Finish session</button></div></section>`;
+    } else {
+      html += `<section class="finish"><div><button class="btn primary big" data-act="start-finish" data-sid="${esc(s.id)}">Finish session</button></div>
+        <div class="extra">Shows what was skipped or not done, then sends ${esc(admin)} a summary.</div></section>`;
     }
     const sNotes = state.notes.filter((x) => x.session === s.id && !x.ex);
     const skey = s.id + "|";
@@ -224,14 +284,51 @@
     const act = btn.dataset.act;
     if (act !== "del") state.confirmDelete = null;
 
-    if (act === "tick") {
-      const { sid, eid } = btn.dataset; const set = +btn.dataset.set; const id = tickId(sid, eid);
+    const saveTick = async (sid, eid, patch) => {
+      const id = tickId(sid, eid);
       const prev = state.ticks[id] || { sets: {} };
+      const next = Object.assign({ session: sid, ex: eid, sets: {}, skipped: false, skipReason: "" }, prev, patch, { by: state.me, at: new Date().toISOString() });
+      state.ticks[id] = next; scheduleRender();
+      try { await store.saveTick(sid, eid, next); } catch (e) { state.ticks[id] = prev; scheduleRender(); writeFailed(e); }
+    };
+    if (act === "tick") {
+      const { sid, eid } = btn.dataset; const set = +btn.dataset.set;
+      const prev = state.ticks[tickId(sid, eid)] || {};
       const sets = Object.assign({}, prev.sets || {});
       if (sets[set]) delete sets[set]; else sets[set] = true;
-      state.ticks[id] = { session: sid, ex: eid, sets, by: state.me, at: new Date().toISOString() };
-      scheduleRender();
-      try { await store.setTick(sid, eid, sets); } catch (e) { state.ticks[id] = prev; scheduleRender(); writeFailed(e); }
+      await saveTick(sid, eid, { sets });
+    } else if (act === "open-skip") {
+      state.openSkip = btn.dataset.key; render();
+      const el = document.getElementById("skip-" + state.openSkip); if (el) el.focus();
+    } else if (act === "cancel-skip") {
+      state.openSkip = null; render();
+    } else if (act === "save-skip") {
+      const { sid, eid } = btn.dataset;
+      const el = document.getElementById("skip-" + sid + "|" + eid);
+      const reason = ((el && el.value) || "").trim();
+      state.openSkip = null;
+      await saveTick(sid, eid, { skipped: true, skipReason: reason });
+    } else if (act === "unskip") {
+      await saveTick(btn.dataset.sid, btn.dataset.eid, { skipped: false, skipReason: "" });
+    } else if (act === "start-finish") {
+      state.finishing = btn.dataset.sid; render();
+      const f = document.querySelector(".finish"); if (f) f.scrollIntoView({ block: "center" });
+    } else if (act === "cancel-finish") {
+      state.finishing = null; render();
+    } else if (act === "confirm-finish") {
+      const sid = btn.dataset.sid; const s = state.sessions.find((x) => x.id === sid); if (!s) return;
+      const r = sessionReport(s);
+      const details = { done: r.stats.done, total: r.stats.total, skipped: r.skipped, partial: r.partial, missed: r.missed };
+      btn.disabled = true;
+      try {
+        await store.finishSession(sid, r.text, details);
+        state.finishes[sid] = { session: sid, by: state.me, at: new Date().toISOString(), summary: r.text, details };
+        state.finishing = null; render();
+      } catch (e) { btn.disabled = false; writeFailed(e); }
+    } else if (act === "reopen") {
+      const sid = btn.dataset.sid; const keep = state.finishes[sid];
+      delete state.finishes[sid]; render();
+      try { await store.reopenSession(sid); } catch (e) { state.finishes[sid] = keep; render(); writeFailed(e); }
     } else if (act === "open-note") {
       state.openComposer = btn.dataset.key; render();
       const el = document.getElementById("note-" + state.openComposer); if (el) el.focus();
@@ -269,7 +366,7 @@
     }
   });
 
-  window.addEventListener("hashchange", () => { state.openComposer = null; render(); window.scrollTo(0, 0); });
+  window.addEventListener("hashchange", () => { state.openComposer = null; state.openSkip = null; state.finishing = null; render(); window.scrollTo(0, 0); });
 
   async function loadSessions() {
     const idx = await fetch("sessions/index.json", { cache: "no-cache" }).then((r) => r.json());
@@ -281,7 +378,7 @@
     state.me = email; state.loaded = false; render();
     try {
       await store.start((data) => {
-        state.ticks = data.ticks; state.notes = data.notes;
+        state.ticks = data.ticks; state.notes = data.notes; state.finishes = data.finishes || {};
         if (state.sessions.length) state.loaded = true;
         scheduleRender();
       });

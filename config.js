@@ -6,7 +6,10 @@ window.TRAINING_CONFIG = {
   supabaseUrl: "https://zaftplbijgkhnbmwegwt.supabase.co",
   supabaseAnonKey: "sb_publishable_x90nGm6xj8KZBHwOqepLtw_KQ3Ftdx4",
   // Friendly names shown next to ticks and notes, keyed by login email.
+  // Who gets notified, shown in the Finish session prompt.
+  adminName: "John",
   people: {
-    // "someone@example.com": "John",
+    "beeso@mac.com": "John",
+    // "trae@example.com": "Trae",
   },
 };

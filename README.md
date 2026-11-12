@@ -34,6 +34,8 @@ Session fields:
 
 Sign-in works with a password (no email needed) or a one-tap email link. Supabase free projects only send a few emails an hour, so passwords are easier. To give someone a password: **Authentication → Users → Add user → Create new user**, enter the email and a password, tick **Auto Confirm User**.
 
+Then run `supabase/002_skip_finish_notify.sql` the same way (fill in the ntfy topic and the admin email first). It adds the Skip button, Finish session, and phone notifications: install the free **ntfy** app and subscribe to the same topic to get a push for every new note and every finished session.
+
 Only the emails in `allowed_emails` can see or change anything. To add someone later, run `insert into allowed_emails values ('their@email.com');` in the SQL Editor.
 
 ### 2. Hosting (Vercel)
