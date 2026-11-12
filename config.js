@@ -10,6 +10,6 @@ window.TRAINING_CONFIG = {
   adminName: "John",
   people: {
     "beeso@mac.com": "John",
-    // "trae@example.com": "Trae",
+    "tkcora387@gmail.com": "Trae",
   },
 };
