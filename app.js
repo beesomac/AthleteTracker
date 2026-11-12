@@ -203,7 +203,11 @@
     if (!email) return;
     state.login = { email, sending: true, sent: false, error: null }; render();
     try { await store.signIn(email); state.login.sent = true; }
-    catch (e) { state.login.error = "Couldn't send the link: " + (e.message || "unknown error") + ". Check the address and try again."; }
+    catch (e) {
+      state.login.error = /rate limit/i.test(e.message || "")
+        ? "Too many sign-in emails in the last hour. Wait an hour, or use the most recent link already in your inbox."
+        : "Couldn't send the link: " + (e.message || "unknown error") + ". Check the address and try again.";
+    }
     state.login.sending = false; render();
   });
 
