@@ -9,7 +9,10 @@
     me: null, sessions: [], ticks: {}, notes: [], finishes: {}, openSkip: null, finishing: null, openLog: null, maxes: {}, openMax: null, guide: null,
     loaded: false, error: null, login: { sent: false, sending: false, error: null },
     openComposer: null, reviewFilter: "open", confirmDelete: null,
+    fileSessions: [], wods: [], board: [], openScore: null,
   };
+  const info = store.info;
+  const W = window.WodScore;
 
   const ytIcon = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M23 7.2a3 3 0 0 0-2.1-2.1C19 4.6 12 4.6 12 4.6s-7 0-8.9.5A3 3 0 0 0 1 7.2 31 31 0 0 0 .5 12a31 31 0 0 0 .5 4.8 3 3 0 0 0 2.1 2.1c1.9.5 8.9.5 8.9.5s7 0 8.9-.5a3 3 0 0 0 2.1-2.1 31 31 0 0 0 .5-4.8 31 31 0 0 0-.5-4.8zM9.7 15.1V8.9l5.8 3.1-5.8 3.1z"/></svg>';
   const skipIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 5l9 7-9 7zM18 5v14"/></svg>';
@@ -23,6 +26,8 @@
   function nameOf(email) {
     if (!email) return "Someone";
     if (email === state.me) return "You";
+    const named = info.names && info.names[String(email).toLowerCase()];
+    if (named) return named;
     const people = cfg.people || {};
     const key = Object.keys(people).find((k) => k.toLowerCase() === String(email).toLowerCase());
     return key ? people[key] : String(email).split("@")[0];
@@ -172,7 +177,7 @@
       else if (e.done === 0) missed.push({ name: ex.name });
       else if (e.done < e.n) partial.push({ name: ex.name, done: e.done, of: e.n });
     }
-    const who = nameOf(state.me) === "You" ? ((cfg.people || {})[state.me] || "Trae") : nameOf(state.me);
+    const who = athleteName();
     const day = doneDay(s);
     const lines = [`${who} finished ${s.title} (${s.short || s.date})${day ? ", done " + fmtDate(day) : ""}: ${st.done}/${st.total} sets done.`];
     if (skipped.length) lines.push("Skipped: " + skipped.map((x) => x.name + (x.reason ? ` (${x.reason})` : "")).join("; ") + ".");
@@ -191,11 +196,21 @@
     return h;
   }
   const openNotes = () => state.notes.filter((n) => !n.reviewed);
+  // Whose log this is: the signed-in athlete, or the athlete a trainer picked.
+  function athleteName() {
+    if (info.v2 && info.athlete) {
+      const a = (info.athletes || []).find((x) => x.email === info.athlete);
+      return a ? a.name : (info.names[info.athlete] || info.name || info.athlete.split("@")[0]);
+    }
+    return (cfg.people || {})[state.me] || "Trae";
+  }
+  const isTrainer = () => info.v2 && info.role === "trainer";
 
   function currentView() {
     const h = (location.hash || "").slice(1);
     if (h === "notes") return { kind: "notes" };
     if (h === "records") return { kind: "records" };
+    if (h === "boards" && info.v2) return { kind: "boards" };
     if (h.startsWith("session-")) { const id = h.slice(8); if (state.sessions.find((s) => s.id === id)) return { kind: "session", id }; }
     const latest = state.sessions[state.sessions.length - 1];
     return latest ? { kind: "session", id: latest.id } : { kind: "none" };
@@ -214,7 +229,8 @@
       return `<a href="#session-${esc(s.id)}" ${cur ? 'aria-current="page"' : ""}>${esc(s.short || "Session " + (i + 1))} · ${esc(fmtDate(sessionDay(s)))}${finished ? " ✓" : ""}</a>`;
     });
     const n = openNotes().length;
- parts.push(`<a href="#records" ${view.kind === "records" ? 'aria-current="page"' : ""}>Records</a>`);
+    parts.push(`<a href="#records" ${view.kind === "records" ? 'aria-current="page"' : ""}>Records</a>`);
+    if (info.v2 && state.wods.some((w) => w.status !== "draft")) parts.push(`<a href="#boards" ${view.kind === "boards" ? 'aria-current="page"' : ""}>Leaderboards</a>`);
     parts.push(`<a href="#notes" ${view.kind === "notes" ? 'aria-current="page"' : ""}>Notes to review${n ? ` <span class="count">${n}</span>` : ""}</a>`);
     tabs.innerHTML = parts.join("");
     const cur = tabs.querySelector('[aria-current="page"]');
@@ -222,9 +238,19 @@
   }
 
   function renderWho() {
+    const h1 = $(".brand h1");
+    if (h1 && info.v2 && info.athlete && state.loaded) h1.innerHTML = `${esc(athleteName())}'s <span>Training</span> Log`;
     if (!state.me || store.mode === "demo") { whoEl.innerHTML = ""; return; }
-    whoEl.innerHTML = `<span></span><button class="signout" data-act="signout">Sign out</button>`;
-    whoEl.querySelector("span").textContent = nameOf(state.me) === "You" ? (cfg.people && cfg.people[state.me]) || state.me.split("@")[0] : "";
+    const me = info.v2 && info.name ? info.name : (cfg.people && cfg.people[state.me]) || state.me.split("@")[0];
+    let picker = "";
+    if (isTrainer() && state.loaded) {
+      picker = info.athletes.length
+        ? `<select class="athlete-pick" data-act="pick-athlete" aria-label="Athlete">${info.athletes.map((a) => `<option value="${esc(a.email)}" ${a.email === info.athlete ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</select>`
+        : "";
+      picker += `<a class="signout" href="console.html">Console</a>`;
+    }
+    whoEl.innerHTML = `${picker}<span></span><button class="signout" data-act="signout">Sign out</button>`;
+    whoEl.querySelector("span").textContent = me;
   }
 
   function noteHTML(n, showWhere) {
@@ -335,7 +361,7 @@
       <h2>${esc(s.title)}</h2>
       <div class="meter"><div class="bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></div><b>${st.done}/${st.total} sets</b></div>
       ${st.skipped ? `<div class="extra">${st.skipped} exercise${st.skipped > 1 ? "s" : ""} skipped</div>` : ""}
-      ${s.summary ? `<div class="status"><strong>Ankle check:</strong> ${esc(s.summary)}</div>` : ""}
+      ${s.summary ? `<div class="status"><strong>${esc(s.summaryLabel || "Ankle check")}:</strong> ${esc(s.summary)}</div>` : ""}
       <button class="btn primary big" data-act="guide-start" data-sid="${esc(s.id)}">${st.done ? "Continue guided workout" : "Start guided workout"}</button>
     </section>`;
     // The first unticked step, going block by block and round by round, is "up next".
@@ -445,7 +471,7 @@
     } else if (state.finishing === s.id) {
       const r = sessionReport(s);
       html += `<section class="finish"><h3>Finish this session?</h3>
-        <div class="extra">${r.stats.done}/${r.stats.total} sets ticked. ${esc(admin)} gets a summary on his phone.</div>
+        <div class="extra">${r.stats.done}/${r.stats.total} sets ticked. ${esc(admin)} gets a summary on their phone.</div>
         <div class="report">${reportListHTML(r)}</div>
         <div class="row"><button class="btn" data-act="cancel-finish">Keep going</button><button class="btn primary" data-act="confirm-finish" data-sid="${esc(s.id)}">Finish session</button></div></section>`;
     } else {
@@ -460,7 +486,7 @@
     </section>`;
     if (s.next && s.next.length) {
       html += `<section class="next"><h3>Next progressions</h3><ul>${s.next.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
-        ${s.planUrl ? `<div class="extra"><a href="${esc(s.planUrl)}" target="_blank" rel="noopener">Trae's full rehab plan and return-to-sport tests</a></div>` : ""}</section>`;
+        ${s.planUrl ? `<div class="extra"><a href="${esc(s.planUrl)}" target="_blank" rel="noopener">${esc(s.planLabel || athleteName() + "'s full plan")}</a></div>` : ""}</section>`;
     }
     return html;
   }
@@ -494,10 +520,39 @@
     return html;
   }
 
+  // Leaderboards: every open or closed WOD, best score per athlete, and a form to log your own.
+  function renderBoards() {
+    const wods = state.wods.filter((w) => w.status !== "draft");
+    let html = `<section class="hero"><div class="eyebrow">WODs</div><h2>Leaderboards</h2>
+      <div class="extra">Best score per athlete. Rx scores rank ahead of scaled.</div></section>`;
+    if (!wods.length) return html + `<div class="empty"><strong>No leaderboards yet</strong><span>Your trainer adds WODs from the console.</span></div>`;
+    html += `<div class="boards">`;
+    for (const w of wods) {
+      const t = W.TYPES[w.score_type] || W.TYPES.reps;
+      const rows = W.rank(w.score_type, state.board.filter((r) => r.wod_id === w.id));
+      const canLog = w.status === "open" && info.role === "athlete";
+      html += `<article class="board">
+        <div class="board-head"><div><div class="ex-name">${esc(w.name)}</div>
+          <div class="extra">${esc(t.label)}${w.time_cap_seconds ? ` · cap ${esc(W.format("time", w.time_cap_seconds))}` : ""}${w.wod_date ? ` · ${esc(fmtDate(w.wod_date))}` : ""}${w.status === "closed" ? " · closed" : ""}</div></div>
+          ${canLog ? `<button class="btn" data-act="open-score" data-wod="${esc(w.id)}">Log score</button>` : ""}</div>
+        ${w.description ? `<div class="cue wod-desc">${esc(w.description)}</div>` : ""}
+        ${rows.length ? `<ol class="ranks">${rows.map((r) => `<li class="${r.is_me ? "me" : ""}"><span class="rank">${r.rank}</span><span class="who">${esc(r.athlete_name)}${r.is_me ? " (you)" : ""}${r.rx ? "" : ` <span class="chip swap">Scaled</span>`}</span><span class="score">${esc(W.format(w.score_type, r.score))}</span></li>`).join("")}</ol>` : `<div class="extra">No scores yet.</div>`}
+        ${state.openScore === w.id ? `<form class="score-form" data-wod="${esc(w.id)}" data-type="${esc(w.score_type)}">
+          <label>Score (${esc(t.hint)})<input id="score-text" type="text" inputmode="${w.score_type === "time" || w.score_type === "rounds_reps" ? "text" : "decimal"}" required autocomplete="off"></label>
+          <label>Date<input id="score-on" type="date" value="${esc(localDay(new Date().toISOString()))}"></label>
+          <label class="check"><input id="score-rx" type="checkbox" checked> Rx (as written)</label>
+          <label>Note<input id="score-note" type="text" maxlength="500" placeholder="Optional, e.g. scaled to 30 kg"></label>
+          <div class="row"><button type="button" class="btn" data-act="cancel-score">Cancel</button><button type="submit" class="btn primary">Save score</button></div>
+        </form>` : ""}
+      </article>`;
+    }
+    return html + `</div>`;
+  }
+
   function renderLogin() {
     const l = state.login;
     if (l.sent) return `<div class="login"><h2>Check your email</h2><p>We sent a sign-in link to <strong>${esc(l.email)}</strong>. Open it on this phone and you'll land back here, signed in.</p><button class="btn" data-act="login-again">Use a different email</button></div>`;
-    return `<form class="login" id="login-form"><h2>Sign in</h2><p>Only John and Trae can see the log.</p>
+    return `<form class="login" id="login-form"><h2>Sign in</h2><p>Only people your trainer has added can see the log.</p>
       <label for="login-email" class="eyebrow">Email</label>
       <input id="login-email" type="email" autocomplete="email" required placeholder="you@example.com" value="${esc(l.email || "")}">
       <label for="login-password" class="eyebrow">Password</label>
@@ -521,8 +576,9 @@
     else if (!state.loaded) html = `<div class="hero"><div class="eyebrow">Loading sessions</div><h2>Getting today's work ready…</h2></div><div class="skeleton"></div><div class="skeleton"></div>`;
     else if (view.kind === "notes") html = renderNotes();
     else if (view.kind === "records") html = renderRecords();
+    else if (view.kind === "boards") html = renderBoards();
     else if (view.kind === "session") html = renderSession(state.sessions.find((s) => s.id === view.id));
-    else html = `<div class="empty"><strong>No sessions yet</strong><span>Add a session file to the sessions folder and it appears here.</span></div>`;
+    else html = `<div class="empty"><strong>No sessions yet</strong><span>${info.v2 ? (isTrainer() ? "Publish a program for this athlete from the console and it appears here." : "Your trainer hasn't published a program for you yet.") : "Add a session file to the sessions folder and it appears here."}</span></div>`;
     app.innerHTML = html;
 
     if (keepInput) {
@@ -598,6 +654,18 @@
       state.guide.key = steps[i + 1] ? steps[i + 1].key : "end"; state.openComposer = null; state.openSkip = null; state.openMax = null;
       window.scrollTo(0, 0);
       await persistTick(sid, eid, { sets });
+      return;
+    }
+    if (ev.target.classList.contains("score-form")) {
+      ev.preventDefault();
+      const f = ev.target;
+      const score = W.parse(f.dataset.type, $("#score-text").value);
+      if (score == null) { flash("That score doesn't look right. Use " + W.TYPES[f.dataset.type].hint + "."); return; }
+      const btn = f.querySelector('[type="submit"]'); btn.disabled = true;
+      try {
+        await store.addResult({ wod: f.dataset.wod, score, rx: $("#score-rx").checked, on: $("#score-on").value, note: $("#score-note").value.trim() });
+        state.openScore = null; render();
+      } catch (e) { btn.disabled = false; writeFailed(e); }
       return;
     }
     if (ev.target.classList.contains("max-form")) {
@@ -775,6 +843,11 @@
       try { await store.deleteNote(id); } catch (e) { state.notes = keep; scheduleRender(); writeFailed(e); }
     } else if (act === "filter") {
       state.reviewFilter = btn.dataset.f; render();
+    } else if (act === "open-score") {
+      state.openScore = state.openScore === btn.dataset.wod ? null : btn.dataset.wod; render();
+      const el = document.getElementById("score-text"); if (el) el.focus();
+    } else if (act === "cancel-score") {
+      state.openScore = null; render();
     } else if (act === "signout") {
       await store.signOut(); state.me = null; state.loaded = false; render();
     } else if (act === "login-again") {
@@ -782,8 +855,22 @@
     }
   });
 
+  // Trainer switching whose log is shown.
+  document.addEventListener("change", async (ev) => {
+    if (!ev.target.matches || !ev.target.matches(".athlete-pick")) return;
+    state.loaded = false; state.guide = null; render();
+    try { await store.setAthlete(ev.target.value); } catch (e) { writeFailed(e); }
+  });
+
   window.addEventListener("hashchange", () => { state.openComposer = null; state.openSkip = null; state.finishing = null; state.openLog = null; state.openMax = null; state.guide = null; render(); window.scrollTo(0, 0); });
 
+  // The sessions/ files were written for the original athlete; anyone added later only sees console programs.
+  function seesFiles() {
+    if (!info.v2) return true;
+    if (info.role === "athlete") return !!info.legacyFiles;
+    const a = (info.athletes || []).find((x) => x.email === info.athlete);
+    return !!(a && a.legacyFiles);
+  }
   async function loadSessions() {
     const idx = await fetch("sessions/index.json", { cache: "no-cache" }).then((r) => r.json());
     const list = await Promise.all(idx.sessions.map((f) => fetch("sessions/" + f, { cache: "no-cache" }).then((r) => r.json())));
@@ -795,15 +882,19 @@
     try {
       await store.start((data) => {
         state.ticks = data.ticks; state.notes = data.notes; state.finishes = data.finishes || {}; state.maxes = data.maxes || {};
-        if (state.sessions.length) state.loaded = true;
+        state.wods = data.wods || []; state.board = data.board || [];
+        // Programs published from the console replace the sessions/ files once there are any.
+        state.sessions = data.programs && data.programs.length
+          ? data.programs.slice().sort((a, b) => (a.date < b.date ? -1 : 1))
+          : (seesFiles() ? state.fileSessions : []);
+        state.loaded = true;
         scheduleRender();
       });
-      if (state.sessions.length) state.loaded = true;
       render();
     } catch (e) {
       console.warn(e);
       state.error = e.code === "not_allowed" || /row-level|permission|policy/i.test(e.message || "")
-        ? "This email isn't on the list for Trae's log. Ask John to add it."
+        ? "This email isn't on the list. Ask your trainer to add it."
         : "Couldn't reach the shared log: " + (e.message || "unknown error");
       render();
     }
@@ -811,8 +902,9 @@
 
   async function boot() {
     if (store.mode === "demo") $("#demo").hidden = false;
-    try { state.sessions = await loadSessions(); }
-    catch (e) { state.error = "Couldn't load the session files."; render(); return; }
+    // The sessions/ files are the fallback until programs are published from the console.
+    try { state.fileSessions = state.sessions = await loadSessions(); }
+    catch (e) { console.warn("No session files", e); state.fileSessions = state.sessions = []; }
     const email = await store.currentUser();
     store.onAuthChange((next) => { state.error = null; if (next) enter(next); else { state.me = null; render(); } });
     if (email) await enter(email); else render();
