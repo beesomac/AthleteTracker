@@ -46,6 +46,23 @@
     }
     return { total, done, skipped };
   }
+  // The day most sets were ticked on (the viewer's local date), e.g. "2026-11-13".
+  function localDay(iso) { const d = new Date(iso); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+  function doneDay(s) {
+    const counts = {};
+    for (const b of s.blocks || []) for (const ex of b.exercises || []) {
+      const t = state.ticks[tickId(s.id, ex.id)];
+      if (!t || !t.sets) continue;
+      for (const k in t.sets) {
+        const v = t.sets[k];
+        const iso = typeof v === "string" ? v : (v ? t.at : null);
+        if (iso) { const d = localDay(iso); counts[d] = (counts[d] || 0) + 1; }
+      }
+    }
+    let best = null;
+    for (const d in counts) if (!best || counts[d] > counts[best]) best = d;
+    return best;
+  }
   function sessionReport(s) {
     const st = sessionStats(s);
     const skipped = [], missed = [], partial = [];
@@ -57,12 +74,13 @@
       else if (e.done < e.n) partial.push({ name: ex.name, done: e.done, of: e.n });
     }
     const who = nameOf(state.me) === "You" ? ((cfg.people || {})[state.me] || "Trae") : nameOf(state.me);
-    const lines = [`${who} finished ${s.title} (${s.short || s.date}): ${st.done}/${st.total} sets done.`];
+    const day = doneDay(s);
+    const lines = [`${who} finished ${s.title} (${s.short || s.date})${day ? ", done " + fmtDate(day) : ""}: ${st.done}/${st.total} sets done.`];
     if (skipped.length) lines.push("Skipped: " + skipped.map((x) => x.name + (x.reason ? ` (${x.reason})` : "")).join("; ") + ".");
     if (partial.length) lines.push("Part done: " + partial.map((x) => `${x.name} ${x.done}/${x.of}`).join("; ") + ".");
     if (missed.length) lines.push("Not done: " + missed.map((x) => x.name).join("; ") + ".");
     if (!skipped.length && !partial.length && !missed.length) lines.push("Everything done.");
-    return { stats: st, skipped, partial, missed, text: lines.join("\n") };
+    return { stats: st, skipped, partial, missed, doneOn: day, text: lines.join("\n") };
   }
   function reportListHTML(r) {
     const li = (arr, f) => arr.map((x) => `<li>${f(x)}</li>`).join("");
@@ -83,13 +101,17 @@
     return latest ? { kind: "session", id: latest.id } : { kind: "none" };
   }
 
+  function sessionDay(s) {
+    const fin = state.finishes[s.id];
+    return (fin && fin.details && fin.details.doneOn) || doneDay(s) || s.date;
+  }
   function renderTabs(view) {
     if (!state.me || !state.loaded) { tabs.innerHTML = ""; return; }
     const parts = state.sessions.map((s, i) => {
       const st = sessionStats(s);
       const cur = view.kind === "session" && view.id === s.id;
       const finished = !!state.finishes[s.id] || (st.total && st.done === st.total);
-      return `<a href="#session-${esc(s.id)}" ${cur ? 'aria-current="page"' : ""}>${esc(s.short || "Session " + (i + 1))} · ${esc(fmtDate(s.date))}${finished ? " ✓" : ""}</a>`;
+      return `<a href="#session-${esc(s.id)}" ${cur ? 'aria-current="page"' : ""}>${esc(s.short || "Session " + (i + 1))} · ${esc(fmtDate(sessionDay(s)))}${finished ? " ✓" : ""}</a>`;
     });
     const n = openNotes().length;
     parts.push(`<a href="#notes" ${view.kind === "notes" ? 'aria-current="page"' : ""}>Notes to review${n ? ` <span class="count">${n}</span>` : ""}</a>`);
@@ -128,14 +150,49 @@
     const st = sessionStats(s);
     const pct = st.total ? Math.round((st.done / st.total) * 100) : 0;
     let html = `<section class="hero">
-      <div class="eyebrow">${esc(fmtDate(s.date))}${s.short ? " · " + esc(s.short) : ""}</div>
+      <div class="eyebrow">${s.short ? esc(s.short) + " · " : ""}${sessionDay(s) !== s.date ? "Done " + esc(fmtDate(sessionDay(s))) + " · planned " + esc(fmtDate(s.date)) : (doneDay(s) ? "Done " : "Planned ") + esc(fmtDate(s.date))}</div>
       <h2>${esc(s.title)}</h2>
       <div class="meter"><div class="bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></div><b>${st.done}/${st.total} sets</b></div>
       ${st.skipped ? `<div class="extra">${st.skipped} exercise${st.skipped > 1 ? "s" : ""} skipped</div>` : ""}
       ${s.summary ? `<div class="status"><strong>Ankle check:</strong> ${esc(s.summary)}</div>` : ""}
     </section>`;
+    // The first unticked step, going block by block and round by round, is "up next".
+    let nextKey = null;
     for (const b of s.blocks || []) {
-      html += `<section class="block"><div class="block-head"><span class="letter">${esc(b.key)}</span><h3>${esc(b.name)}</h3>${b.rounds ? `<span class="rounds">${esc(b.rounds)}</span>` : ""}</div><div class="exlist">`;
+      const act = (b.exercises || []).filter((ex) => ex.status !== "hold" && !exState(s, ex).skipped);
+      const rounds = Math.max(0, ...act.map((ex) => ex.sets || 1));
+      for (let r = 1; r <= rounds && !nextKey; r++) for (const ex of act) {
+        if (r > (ex.sets || 1)) continue;
+        if (!exState(s, ex).t.sets || !exState(s, ex).t.sets[r]) { nextKey = ex.id + "#" + r; break; }
+      }
+      if (nextKey) break;
+    }
+    for (const b of s.blocks || []) {
+      const active = (b.exercises || []).filter((ex) => ex.status !== "hold");
+      const circuit = active.length > 1;
+      const roundsN = Math.max(0, ...active.map((ex) => ex.sets || 1));
+      html += `<section class="block"><div class="block-head"><span class="letter">${esc(b.key)}</span><h3>${esc(b.name)}</h3>${roundsN ? `<span class="rounds">${roundsN} round${roundsN > 1 ? "s" : ""}</span>` : ""}</div>`;
+      if (circuit) {
+        html += `<div class="how">Do one set of each exercise in order, then start the next round.</div><div class="round-grid">`;
+        for (let r = 1; r <= roundsN; r++) {
+          let rows = "", doneInRound = 0, inRound = 0;
+          active.forEach((ex, idx) => {
+            if (r > (ex.sets || 1)) return;
+            const e = exState(s, ex);
+            const label = b.key + (idx + 1);
+            if (e.skipped) { rows += `<li class="step skipped"><span class="step-num">${esc(label)}</span><span class="step-name">${esc(ex.name)}</span><span class="step-target">Skipped</span><span class="step-check" aria-hidden="true">–</span></li>`; return; }
+            inRound++;
+            const on = !!(e.t.sets && e.t.sets[r]); if (on) doneInRound++;
+            const isNext = nextKey === ex.id + "#" + r;
+            rows += `<li><button class="step${on ? " on" : ""}${isNext ? " is-next" : ""}" data-act="tick" data-sid="${esc(s.id)}" data-eid="${esc(ex.id)}" data-set="${r}" aria-pressed="${on}" aria-label="Round ${r}: ${esc(ex.name)}, ${esc(ex.target || "")}">
+              <span class="step-inner"><span class="step-num">${esc(label)}</span><span class="step-name">${esc(ex.name)}${isNext ? ` <span class="up-next">Up next</span>` : ""}</span><span class="step-target">${esc(ex.target || "")}</span><span class="step-check" aria-hidden="true">${on ? "✓" : ""}</span></span></button></li>`;
+          });
+          const roundDone = inRound && doneInRound === inRound;
+          html += `<div class="round${roundDone ? " done" : ""}"><div class="round-label">Round ${r}<span>${roundDone ? "Done ✓" : `${doneInRound}/${inRound}`}</span></div><ol>${rows}</ol></div>`;
+        }
+        html += `</div><div class="how sub">Exercise details</div>`;
+      }
+      html += `<div class="exlist">`;
       for (const ex of b.exercises || []) {
         const e = exState(s, ex);
         const t = e.t, sets = t.sets || {}, n = e.n, doneN = e.done;
@@ -156,7 +213,7 @@
           ${ex.cue ? `<div class="cue">${esc(ex.cue)}</div>` : ""}
           ${ex.extra ? `<div class="extra">${esc(ex.extra)}</div>` : ""}
           <div class="ex-row">
-            ${hold ? `<span class="who-ticked">Not this session</span>` : skipped ? `<span class="who-ticked">Skipped by ${esc(nameOf(t.by))} · ${esc(fmtWhen(t.at))}</span>` : `<div class="pips">${pips}</div>`}
+            ${hold ? `<span class="who-ticked">Not this session</span>` : skipped ? `<span class="who-ticked">Skipped by ${esc(nameOf(t.by))} · ${esc(fmtWhen(t.at))}</span>` : circuit ? `<span class="who-ticked">${doneN}/${n} rounds done</span>` : `<div class="pips">${pips}</div>`}
             <div class="tools">
               <a class="btn" href="${esc(ytLink(ex))}" target="_blank" rel="noopener">${ytIcon}${ex.video ? "Video" : "Examples"}</a>
               <button class="btn" data-act="open-note" data-key="${esc(key)}">${noteIcon}Note</button>
@@ -165,7 +222,7 @@
           </div>
           ${state.openSkip === key ? `<div class="composer"><input id="skip-${esc(key)}" class="skip-input" type="text" maxlength="200" placeholder="Why skip? e.g. ankle sore, no box, ran out of time (optional)">
             <div class="row"><button class="btn" data-act="cancel-skip">Cancel</button><button class="btn primary" data-act="save-skip" data-sid="${esc(s.id)}" data-eid="${esc(ex.id)}">Skip exercise</button></div></div>` : ""}
-          ${t.by && doneN && !skipped ? `<div class="who-ticked">Last ticked by ${esc(nameOf(t.by))} · ${esc(fmtWhen(t.at))}</div>` : ""}
+          ${t.by && doneN && !skipped && !circuit ? `<div class="who-ticked">Last ticked by ${esc(nameOf(t.by))} · ${esc(fmtWhen(t.at))}</div>` : ""}
           ${exNotes.length ? `<div class="notes">${exNotes.map((x) => noteHTML(x, false)).join("")}</div>` : ""}
           ${state.openComposer === key ? composerHTML(key) : ""}
         </article>`;
@@ -177,7 +234,7 @@
     if (fin) {
       const r = { skipped: (fin.details && fin.details.skipped) || [], partial: (fin.details && fin.details.partial) || [], missed: (fin.details && fin.details.missed) || [] };
       html += `<section class="finish done"><h3>Session finished</h3>
-        <div class="extra">Finished by ${esc(nameOf(fin.by))} · ${esc(fmtWhen(fin.at))}</div>
+        <div class="extra">${fin.details && fin.details.doneOn ? "Done " + esc(fmtDate(fin.details.doneOn)) + " · " : ""}finished by ${esc(nameOf(fin.by))} · ${esc(fmtWhen(fin.at))}</div>
         <div class="report">${reportListHTML(r)}</div>
         <div><button class="btn" data-act="reopen" data-sid="${esc(s.id)}">Reopen session</button></div></section>`;
     } else if (state.finishing === s.id) {
@@ -295,7 +352,7 @@
       const { sid, eid } = btn.dataset; const set = +btn.dataset.set;
       const prev = state.ticks[tickId(sid, eid)] || {};
       const sets = Object.assign({}, prev.sets || {});
-      if (sets[set]) delete sets[set]; else sets[set] = true;
+      if (sets[set]) delete sets[set]; else sets[set] = new Date().toISOString();
       await saveTick(sid, eid, { sets });
     } else if (act === "open-skip") {
       state.openSkip = btn.dataset.key; render();
@@ -318,7 +375,7 @@
     } else if (act === "confirm-finish") {
       const sid = btn.dataset.sid; const s = state.sessions.find((x) => x.id === sid); if (!s) return;
       const r = sessionReport(s);
-      const details = { done: r.stats.done, total: r.stats.total, skipped: r.skipped, partial: r.partial, missed: r.missed };
+      const details = { done: r.stats.done, total: r.stats.total, doneOn: r.doneOn, skipped: r.skipped, partial: r.partial, missed: r.missed };
       btn.disabled = true;
       try {
         await store.finishSession(sid, r.text, details);
