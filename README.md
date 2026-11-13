@@ -56,6 +56,8 @@ Then run `supabase/002_skip_finish_notify.sql` the same way (fill in the ntfy to
 
 Then run `supabase/003_lift_maxes.sql`, and `supabase/004_trainer_console.sql` for the trainer console. 004 moves people into a `members` table: the notify admin email becomes the trainer and everyone else an athlete. It gives all existing ticks, notes, finishes and 1RMs to the existing athlete, so nothing is lost. Deploy the website first, then run it; both orders are safe for the existing athlete.
 
+Then run `supabase/005_workout_start_notify.sql` to get a push when any athlete starts a workout (their first tick or skip in a session; one per athlete per session, none when a trainer ticks for them). Replace `NTFY_TOPIC_HERE` with your ntfy topic first, or leave it if 002 already set one. It doesn't need 002, only 004.
+
 After 004, add and rename people in the console (Athletes). Before 004, only the emails in `allowed_emails` can see or change anything; to add someone, run `insert into allowed_emails values ('their@email.com');` in the SQL Editor.
 
 ### Data for other apps (iOS)
@@ -68,6 +70,7 @@ Everything lives in Supabase, readable with the anon key plus a signed-in user, 
 | `programs` | Published sessions: `id`, `athlete_email` (null = everyone), `date`, `title`, `body` (the session JSON) |
 | `ticks`, `notes`, `session_finishes`, `lift_maxes` | Per-athlete feedback, keyed by `athlete_email` + `session_id` (= program `id`) |
 | `wods`, `wod_board()` | WODs and their ranked boards (names only, best score per athlete). Scores: seconds for time, reps, kg, or rounds × 1000 + reps; `wod.js` formats them |
+| `session_starts` | When each athlete started each session (first tick), from 005 |
 | `wod_results` | An athlete's own scores; insert one to log a score on an open WOD |
 
 ### 2. Hosting (Vercel)
