@@ -44,7 +44,8 @@
      "name": "Calf Raises (double then single leg)",
      "sets": 2,
      "target": "10 + 10",
-     "cue": "Same primer as sessions 1 and 2, before pogos: 2×10 double-leg, then 2×10 single-leg on the injured side.",
+     "status": "new",
+     "cue": "Same primer as session 1, before pogos: 2×10 double-leg, then 2×10 single-leg on the injured side.",
      "search": "single leg calf raise"
     }
    ]
@@ -58,8 +59,8 @@
      "id": "sp1",
      "name": "Pogo Jumps",
      "sets": 3,
-     "target": "20 reps",
-     "cue": "Stiff ankles, quiet even landings. Same 3×20 as session 2; if those felt easy and even, push height a little.",
+     "target": "15 reps",
+     "cue": "Stiff ankles, quiet even landings. If session 1 pogos felt easy and even, push height a little.",
      "search": "pogo jumps"
     },
     {
@@ -74,8 +75,8 @@
      "id": "sp3",
      "name": "Box Jump",
      "sets": 3,
-     "target": "5 reps",
-     "cue": "Jump up, step down (don't jump down). Land soft and level on the box. Up from 3×4 in session 2.",
+     "target": "4 reps",
+     "cue": "Jump up, step down (don't jump down). Land soft and level on the box. Up from 3×3 last time.",
      "search": "box jump step down"
     }
    ]
@@ -179,8 +180,8 @@
   }
  ],
  "next": [
-  "Pogos: 3×20, then forward/back and side-to-side, then single-leg.",
-  "Box jumps at 3×5 now. Next toward broad jumps: broad jump with a 2-second stuck landing, then full broad jumps.",
+  "Pogos: 3×15 → 3×20, then forward/back and side-to-side, then single-leg.",
+  "Box jumps at 3×4 now. Next toward broad jumps: broad jump with a 2-second stuck landing, then full broad jumps.",
   "Ready for broad jumps when pogos are easy and even, sprints pain-free, and about 25 single-leg calf raises on the injured side.",
   "If walking lunges look solid, lateral lunges are a good next addition for side-to-side ankle control."
  ]
