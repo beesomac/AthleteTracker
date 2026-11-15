@@ -23,6 +23,17 @@
   function fmtDate(iso) { try { return new Date(iso + "T12:00:00").toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }); } catch (e) { return iso; } }
   function fmtWhen(iso) { try { const d = new Date(iso); return d.toLocaleDateString(undefined, { day: "numeric", month: "short" }) + " " + d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }); } catch (e) { return ""; } }
   function ytLink(ex) { return ex.video || "https://www.youtube.com/results?search_query=" + encodeURIComponent((ex.search || ex.name) + " exercise demo"); }
+  // A YouTube link (youtu.be, watch?v=, shorts, embed) as an embeddable player URL, or null.
+  function ytEmbed(url) {
+    const m = /^https:\/\/(?:www\.|m\.)?(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/))([\w-]{11})/.exec(String(url || ""));
+    return m ? "https://www.youtube-nocookie.com/embed/" + m[1] + "?rel=0&playsinline=1" : null;
+  }
+  function videoHTML(ex) {
+    const src = ex.embed !== false && ytEmbed(ex.video);
+    return src ? `<div class="video"><iframe src="${esc(src)}" title="${esc(ex.name)}" loading="lazy" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>` : "";
+  }
+  // log: "tick" means a plain done/not done item (e.g. a follow-along video): no reps or weight.
+  const tickOnly = (ex) => ex.log === "tick";
   function nameOf(email) {
     if (!email) return "Someone";
     if (email === state.me) return "You";
@@ -323,21 +334,22 @@
         ${ex.status && chipLabel[ex.status] ? `<div class="chips"><span class="chip ${esc(ex.status)}">${chipLabel[ex.status]}</span></div>` : ""}
         ${ex.cue ? `<div class="cue">${esc(ex.cue)}</div>` : ""}
         ${ex.extra ? `<div class="extra">${esc(ex.extra)}</div>` : ""}
-        ${liftLine(ex, s.id)}
+        ${videoHTML(ex)}
+        ${tickOnly(ex) ? "" : liftLine(ex, s.id)}
         <form class="guide-form" data-sid="${esc(s.id)}" data-eid="${esc(ex.id)}" data-set="${st.r}">
-          <div class="stepper"><span class="stepper-label">Reps</span>
+          ${tickOnly(ex) ? "" : `<div class="stepper"><span class="stepper-label">Reps</span>
             <button type="button" class="step-btn" data-act="bump" data-field="guide-reps" data-delta="-1" aria-label="One less rep">−</button>
             <input id="guide-reps" type="number" inputmode="numeric" min="0" max="999" step="1" value="${esc(reps)}">
             <button type="button" class="step-btn" data-act="bump" data-field="guide-reps" data-delta="1" aria-label="One more rep">+</button></div>
           <div class="stepper"><span class="stepper-label">Weight kg</span>
             <button type="button" class="step-btn" data-act="bump" data-field="guide-kg" data-delta="-2.5" aria-label="2.5 kg less">−</button>
             <input id="guide-kg" type="number" inputmode="decimal" min="0" max="999" step="0.5" value="${esc(kg)}" placeholder="none">
-            <button type="button" class="step-btn" data-act="bump" data-field="guide-kg" data-delta="2.5" aria-label="2.5 kg more">+</button></div>
+            <button type="button" class="step-btn" data-act="bump" data-field="guide-kg" data-delta="2.5" aria-label="2.5 kg more">+</button></div>`}
           <button type="submit" class="btn primary big">${info ? "Save · next" : "Done · next"}</button>
           ${info ? `<button type="button" class="btn" data-act="guide-untick">Untick this set</button>` : ""}
         </form>
         <div class="tools guide-tools">
-          <a class="btn" href="${esc(ytLink(ex))}" target="_blank" rel="noopener">${ytIcon}${ex.video ? "Video" : "Examples"}</a>
+          <a class="btn" href="${esc(ytLink(ex))}" target="_blank" rel="noopener">${ytIcon}${ex.video ? "Open in YouTube" : "Examples"}</a>
           <button class="btn" data-act="open-note" data-key="${esc(key)}">${noteIcon}Note</button>
           <button class="btn" data-act="open-skip" data-key="${esc(key)}">${skipIcon}Skip exercise</button>
         </div>
@@ -382,7 +394,27 @@
       const lifts = liftHistory();
       html += `<section class="block"><div class="block-head"><span class="letter">${esc(b.key)}</span><h3>${esc(b.name)}</h3>${roundsN ? `<span class="rounds">${roundsN} ${circuit ? "round" : "set"}${roundsN > 1 ? "s" : ""}</span>` : ""}</div>`;
       let setsHtml = "";
-      if (active.length) {
+      if (active.length && active.every(tickOnly)) {
+        setsHtml += `<div class="how">Tap the circle when it's done.</div><div class="round-grid">`;
+        for (let r = 1; r <= roundsN; r++) {
+          let rows = "", doneInRound = 0, inRound = 0;
+          active.forEach((ex) => {
+            if (r > (ex.sets || 1)) return;
+            const e = exState(s, ex);
+            if (e.skipped) { rows += `<li class="step skipped"><span class="step-num">${esc(b.key)}</span><span class="step-name">${esc(ex.name)}</span><span class="step-target">Skipped</span><span class="step-check" aria-hidden="true">–</span></li>`; return; }
+            inRound++;
+            const info = setInfo(e.t.sets && e.t.sets[r]); const on = !!info; if (on) doneInRound++;
+            rows += `<li class="step-row tick-only${on ? " on" : ""}${nextKey === ex.id + "#" + r ? " is-next" : ""}">
+              <span class="step-num">${esc(b.key)}</span>
+              <span class="step-main"><span class="step-name">${esc(ex.name)}</span>
+                <span class="step-log">${on && info.at ? "Done " + esc(fmtWhen(info.at)) : `<span class="step-target-inline">${esc(ex.target || "")}</span>`}</span></span>
+              <button class="step-check" data-act="tick" data-sid="${esc(s.id)}" data-eid="${esc(ex.id)}" data-set="${r}" aria-pressed="${on}" aria-label="Mark ${esc(ex.name)} done">${on ? "✓" : ""}</button>
+            </li>`;
+          });
+          setsHtml += `<div class="round single${inRound && doneInRound === inRound ? " done" : ""}"><ol>${rows}</ol></div>`;
+        }
+        setsHtml += `</div>`;
+      } else if (active.length) {
         setsHtml += circuit ? `<div class="how">Do one set of each exercise in order, then start the next round. Type the weight in the box to tick it off, or tap the circle. Tap an exercise to change reps.</div>` : `<div class="how">Type the weight in the box to tick off the set, or tap the circle. Tap a set to change reps.</div>`;
         setsHtml += `<div class="round-grid">`;
         for (let r = 1; r <= roundsN; r++) {
@@ -401,6 +433,15 @@
             const thisSet = L && L.sets.find((x) => x.session.id === s.id && x.ex.id === ex.id && x.round === r);
             const planned = plannedKg(s, ex, r);
             const logged = info && (info.reps || info.kg) ? `${info.reps ? esc(info.reps) + " reps" : ""}${info.reps && info.kg ? " × " : ""}${info.kg ? esc(info.kg) + " kg" : ""}` : "";
+            if (tickOnly(ex)) {
+              rows += `<li class="step-row tick-only${on ? " on" : ""}${isNext ? " is-next" : ""}">
+              <span class="step-num">${esc(label)}</span>
+              <span class="step-main"><span class="step-name">${esc(ex.name)}${isNext ? ` <span class="up-next">Up next</span>` : ""}</span>
+                <span class="step-log">${on && info.at ? "Done " + esc(fmtWhen(info.at)) : `<span class="step-target-inline">${esc(ex.target || "")}</span>`}</span></span>
+              <button class="step-check" data-act="tick" data-sid="${esc(s.id)}" data-eid="${esc(ex.id)}" data-set="${r}" aria-pressed="${on}" aria-label="Mark ${esc(ex.name)} done">${on ? "✓" : ""}</button>
+            </li>`;
+              return;
+            }
             rows += `<li class="step-row${on ? " on" : ""}${isNext ? " is-next" : ""}">
               <span class="step-num">${esc(label)}</span>
               <button class="step-main" data-act="open-log" data-key="${esc(logKey)}" aria-label="Log reps and weight for ${esc(ex.name)}, ${circuit ? "round" : "set"} ${r}">
@@ -442,11 +483,12 @@
           ${skipped && e.reason ? `<div class="skip-reason">Why: ${esc(e.reason)}</div>` : ""}
           ${ex.cue ? `<div class="cue">${esc(ex.cue)}</div>` : ""}
           ${ex.extra ? `<div class="extra">${esc(ex.extra)}</div>` : ""}
-          ${hold ? "" : liftLine(ex, s.id)}
+          ${hold ? "" : videoHTML(ex)}
+          ${hold || tickOnly(ex) ? "" : liftLine(ex, s.id)}
           <div class="ex-row">
-            ${hold ? `<span class="who-ticked">Not this session</span>` : skipped ? `<span class="who-ticked">Skipped by ${esc(nameOf(t.by))} · ${esc(fmtWhen(t.at))}</span>` : `<span class="who-ticked">${doneN}/${n} ${circuit ? "rounds" : "sets"} done</span>`}
+            ${hold ? `<span class="who-ticked">Not this session</span>` : skipped ? `<span class="who-ticked">Skipped by ${esc(nameOf(t.by))} · ${esc(fmtWhen(t.at))}</span>` : tickOnly(ex) && n === 1 ? `<span class="who-ticked">${doneN ? "Done ✓" : "Not done yet"}</span>` : `<span class="who-ticked">${doneN}/${n} ${circuit ? "rounds" : "sets"} done</span>`}
             <div class="tools">
-              <a class="btn" href="${esc(ytLink(ex))}" target="_blank" rel="noopener">${ytIcon}${ex.video ? "Video" : "Examples"}</a>
+              <a class="btn" href="${esc(ytLink(ex))}" target="_blank" rel="noopener">${ytIcon}${ex.video ? "Open in YouTube" : "Examples"}</a>
               <button class="btn" data-act="open-note" data-key="${esc(key)}">${noteIcon}Note</button>
               ${hold ? "" : skipped ? `<button class="btn" data-act="unskip" data-sid="${esc(s.id)}" data-eid="${esc(ex.id)}">Undo skip</button>` : `<button class="btn" data-act="open-skip" data-key="${esc(key)}">${skipIcon}Skip</button>`}
             </div>
@@ -641,7 +683,7 @@
     if (ev.target.classList.contains("guide-form")) {
       ev.preventDefault();
       const f = ev.target; const { sid, eid } = f.dataset; const set = +f.dataset.set;
-      const reps = parseInt($("#guide-reps").value, 10); const kg = parseFloat($("#guide-kg").value);
+      const reps = $("#guide-reps") ? parseInt($("#guide-reps").value, 10) : 0; const kg = $("#guide-kg") ? parseFloat($("#guide-kg").value) : 0;
       const prev = state.ticks[tickId(sid, eid)] || {};
       const old = setInfo((prev.sets || {})[set]);
       const sets = Object.assign({}, prev.sets || {});

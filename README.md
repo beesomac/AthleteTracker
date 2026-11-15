@@ -36,7 +36,7 @@ Session fields:
 | `short`, `title` | Tab label (e.g. "Session 3") and the heading |
 | `summary` | The ankle check shown at the top |
 | `blocks[]` | `key` (A, B… or 1, 2…), `name`, optional `rounds` |
-| `blocks[].exercises[]` | `id`, `name`, `sets` (number of tick circles), `target` (e.g. "10 reps"), optional `status` (`new`, `back`, `swap`, `watch`, `hold`), `cue`, `extra` (RPE / previous loads), `search` (YouTube search words), `video` (a specific YouTube link, replaces the search), `pct` (e.g. `0.75` to suggest 75% of the lift's estimated 1RM), `pcts` (one % per set, e.g. `[0.7, 0.75, 0.8]`, so later sets scale up or down from the weight typed in), `suggestKg` (a fixed suggested weight) |
+| `blocks[].exercises[]` | `id`, `name`, `sets` (number of tick circles), `target` (e.g. "10 reps"), optional `status` (`new`, `back`, `swap`, `watch`, `hold`), `cue`, `extra` (RPE / previous loads), `search` (YouTube search words), `video` (a specific YouTube link, replaces the search; YouTube links also play inline), `log: "tick"` (a plain done/not done item with no reps or weight box, e.g. a follow-along video), `pct` (e.g. `0.75` to suggest 75% of the lift's estimated 1RM), `pcts` (one % per set, e.g. `[0.7, 0.75, 0.8]`, so later sets scale up or down from the weight typed in), `suggestKg` (a fixed suggested weight) |
 | `next[]` | Next progressions, listed at the bottom |
 | `planUrl`, `planLabel` | Link to the full plan, and its link text |
 | `summaryLabel` | Label for `summary` (default "Ankle check") |

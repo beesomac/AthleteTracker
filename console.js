@@ -207,6 +207,8 @@
         else ids.add(String(ex.id));
         if (ex && ex.sets != null && !(Number.isInteger(ex.sets) && ex.sets >= 1 && ex.sets <= 20)) errors.push(`${w2}: "sets" should be a whole number from 1 to 20.`);
         if (ex && ex.pct != null && !(ex.pct > 0 && ex.pct <= 1.2)) warnings.push(`${w2}: "pct" is a fraction, e.g. 0.75 for 75%.`);
+        if (ex && ex.video != null && !/^https:\/\//.test(String(ex.video))) errors.push(`${w2}: "video" should be a full https:// link.`);
+        if (ex && ex.log != null && ex.log !== "tick") warnings.push(`${w2}: "log" only understands "tick" (a done/not done item with no reps or weight).`);
       });
     });
     return { body, errors, warnings };
