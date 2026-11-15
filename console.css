@@ -80,3 +80,76 @@ label.file input{position:absolute;inset:0;opacity:0;cursor:pointer}
 /* Feedback replies */
 .reply-form{margin-top:4px}
 .reply-form label.check{min-height:auto;font-size:13px !important}
+
+/* Program builder: exercise library (drag source) beside the program's blocks (drop targets). */
+.mode-tabs{display:inline-flex;margin-top:14px;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--surface)}
+.mode-tabs button{border:0;background:none;padding:7px 16px;font:600 13px var(--body);color:var(--muted);cursor:pointer}
+.mode-tabs button[aria-selected="true"]{background:var(--ink);color:var(--surface)}
+.builder{display:grid;grid-template-columns:minmax(260px,320px) 1fr;gap:14px;align-items:start}
+@media (max-width:860px){.builder{grid-template-columns:1fr}}
+.builder input,.builder select,.builder textarea{border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);font:500 14px var(--body);padding:6px 8px;min-width:0}
+.builder textarea{width:100%;resize:vertical;font-weight:400}
+.builder button.icon{border:1px solid transparent;background:none;color:var(--muted);border-radius:6px;padding:4px 7px;font:600 12px var(--body);cursor:pointer;white-space:nowrap}
+.builder button.icon:hover:not(:disabled),.builder button.icon.on{border-color:var(--line);color:var(--ink)}
+.builder button.icon:disabled{opacity:.3;cursor:default}
+.builder button.icon.danger:hover{color:var(--accent)}
+.builder button.link{border:0;background:none;padding:0;color:var(--info);font:600 12.5px var(--body);cursor:pointer}
+.grip{flex:0 0 auto;width:10px;align-self:stretch;cursor:grab;background:radial-gradient(circle,var(--muted) 1.2px,transparent 1.6px) 0 0/5px 5px;opacity:.5;border-radius:2px;min-height:18px}
+
+.lib{position:sticky;top:118px;max-height:calc(100vh - 130px);display:flex;flex-direction:column;gap:10px}
+.lib .lib-search{width:100%}
+.lib-cats{display:flex;flex-wrap:wrap;gap:5px}
+.chip-btn{border:1px solid var(--line);background:var(--surface);color:var(--muted);border-radius:999px;padding:3px 10px;font:600 12px var(--body);cursor:pointer}
+.chip-btn.on{background:var(--ink);border-color:var(--ink);color:var(--surface)}
+.lib-list{overflow:auto;margin:0 -6px;padding:0 6px;display:grid;gap:12px;align-content:start}
+@media (max-width:860px){.lib{position:static;max-height:none}.lib-list{max-height:340px}}
+.lib-group h4{margin:0 0 5px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.lib-group ul{list-style:none;margin:0;padding:0;display:grid;gap:5px}
+.lib-item{display:flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:9px;padding:7px 8px 7px 9px;background:var(--surface);cursor:grab;user-select:none}
+.lib-item:hover{border-color:var(--muted)}
+.lib-item.dragging,.bex.dragging{opacity:.4}
+.lib-text{flex:1;min-width:0;display:grid;gap:1px;font-size:14px;line-height:1.25}
+.lib-text b{font-weight:600}
+.lib-text .extra{font-size:12px}
+.lib-last{font-size:11.5px;color:var(--done)}
+.lib-last.never{color:var(--muted)}
+.lib-item .add{flex:0 0 auto;width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font:600 18px/1 var(--body);cursor:pointer}
+.lib-item .add:hover{background:var(--accent);border-color:var(--accent);color:#fff}
+.lib-empty{font-size:13px}
+
+.canvas{display:grid;gap:12px;min-width:0}
+.summary-field{display:grid;gap:4px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:600;color:var(--muted)}
+.bblock{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--line);border-radius:12px;padding:10px 12px;display:grid;gap:8px}
+.bblock.is-target{border-left-color:var(--accent)}
+.bblock-head{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.builder .bkey{width:40px;text-align:center;font:700 16px var(--display);background:var(--ink);color:var(--surface);border-color:var(--ink)}
+.builder .bname{flex:1 1 160px;font:600 18px var(--display);letter-spacing:.01em}
+.builder .brounds{width:110px;font-size:13px}
+.bblock-btns{display:flex;gap:2px;margin-left:auto}
+.drop{list-style:none;margin:0;padding:4px;display:grid;gap:5px;border:1.5px dashed transparent;border-radius:9px;min-height:44px;transition:background .1s}
+.drop.drop-over{border-color:var(--accent);background:var(--accent-soft)}
+.drop-hint{display:grid;place-items:center;min-height:44px;color:var(--muted);font-size:13px;border:1.5px dashed var(--line);border-radius:8px}
+.drop.drop-over .drop-hint{border-color:transparent}
+.bex{display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:var(--bg);border-radius:8px;padding:6px 6px 6px 8px;position:relative}
+.bex.is-hold{opacity:.6}
+.bex.drop-before::before,.drop.drop-end::after{content:"";position:absolute;left:4px;right:4px;top:-4px;height:3px;border-radius:2px;background:var(--accent)}
+.drop.drop-end{position:relative}
+.drop.drop-end::after{top:auto;bottom:1px}
+.bex.just-added{animation:justadded 1.2s ease-out}
+@keyframes justadded{from{background:var(--accent-soft)}to{background:var(--bg)}}
+.bex-main{flex:1;min-width:0;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.builder .ex-name{flex:1 1 180px;font-weight:600}
+.dose{display:inline-flex;align-items:center;gap:4px}
+.builder .ex-sets{width:52px;text-align:center}
+.builder .ex-target{width:110px}
+.dose .x{color:var(--muted)}
+.bex-btns{display:flex;gap:2px;margin-left:auto}
+.bex-more{flex-basis:100%;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;padding:4px 0 2px 18px}
+.bex-more label{display:grid;gap:3px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:600;color:var(--muted)}
+.bex-more label.full{grid-column:1/-1}
+.bex-more .extra{font-size:11.5px;align-self:end}
+.bblock-foot{display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap;font-size:12px}
+.drop.new-block{display:flex;align-items:center;justify-content:center;gap:10px;border-color:var(--line);color:var(--muted);font-size:13px;padding:12px;flex-wrap:wrap}
+.builder-check{margin-top:12px}
+.canvas-top{display:grid;grid-template-columns:140px 1fr;gap:10px}
+@media (max-width:460px){.canvas-top{grid-template-columns:1fr}}

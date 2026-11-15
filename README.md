@@ -21,6 +21,8 @@ On the athlete site a trainer gets an athlete picker in the header to see and ti
 
 Use **Programs → New program** in the console. Once any program is published for an athlete, the athlete site shows those instead of the files.
 
+The program editor opens in **Builder**: the exercise library sits on the left, and each exercise is a block you drag into a program block (Prep, Speed & Power, Primary Strength and so on), or add with **+** to the highlighted block. Drag exercises to reorder them or move them between blocks, and edit sets, target, status and cue in place. Each library exercise shows the last time the athlete did it (from published programs and the `sessions/` files). The library starts from `exercises.json`, and any exercise used in a saved program joins it automatically, so a new one only needs adding once with **+ New exercise**. Empty blocks are left out when you save. The **JSON** tab still shows and edits the same session JSON.
+
 The `sessions/` files still work for the original athlete until programs are published for them (the console offers a one-click import of the files, keeping their ids so ticks and notes still line up). To add one the old way:
 
 1. Add a file to `sessions/` named by date, e.g. `sessions/2026-11-26.json`. Copy an existing session as a template.

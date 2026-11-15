@@ -12,7 +12,10 @@
     members: [], programs: [], notes: [], finishes: [], wods: [], results: [],
     login: {}, athleteFilter: "", notesFilter: "open", confirm: null,
     editingMember: null, edit: null, reply: null, editingWod: false, fileIds: null,
+    fileSessions: [], librarySeed: null,
+    builder: { query: "", cat: "", target: null, open: new Set(), confirm: null },
   };
+  const PB = window.ProgramBuilder;
 
   // ─── helpers ──────────────────────────────────────────────────────────────────────────
   function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
@@ -176,15 +179,25 @@
     return html + `</tbody></table></div>`;
   }
 
+  // A new program starts with the usual block layout, empty; drag exercises in from the library.
   const TEMPLATE = {
-    short: "Session 1",
-    summary: "",
+    short: "",
     blocks: [
-      { key: "A", name: "Prep", rounds: "2 rounds", exercises: [{ id: "a1", name: "Deadbug", sets: 2, target: "10 reps", search: "dead bug exercise" }] },
-      { key: "B", name: "Strength", exercises: [{ id: "b1", name: "Trap Bar Deadlift", sets: 4, target: "6 reps", pct: 0.75, cue: "Even weight through both feet." }] },
+      { key: "A", name: "Prep", rounds: "2 rounds", exercises: [] },
+      { key: "B", name: "Speed & Power", rounds: "3 rounds", exercises: [] },
+      { key: "C", name: "Primary Strength", rounds: "4 rounds", exercises: [] },
+      { key: "D", name: "Secondary Strength", rounds: "3 rounds", exercises: [] },
+      { key: "E", name: "Accessories", rounds: "3 rounds", exercises: [] },
+      { key: "F", name: "Resilience", rounds: "3 rounds", exercises: [] },
     ],
     next: [],
   };
+  // Empty blocks are fine while building; they're left out when the program is saved.
+  function withoutEmptyBlocks(body) {
+    const b = Object.assign({}, body);
+    if (Array.isArray(b.blocks)) b.blocks = b.blocks.filter((x) => !(x && Array.isArray(x.exercises) && !x.exercises.length));
+    return b;
+  }
 
   // Checks a pasted session. Returns { body, errors, warnings }.
   function checkProgram(text) {
@@ -192,13 +205,14 @@
     try { body = JSON.parse(text); } catch (e) { return { errors: ["Not valid JSON: " + e.message] }; }
     const errors = [], warnings = [];
     if (!body || typeof body !== "object" || Array.isArray(body)) return { errors: ["The program should be one JSON object { … }."] };
-    if (!Array.isArray(body.blocks) || !body.blocks.length) errors.push("Needs a \"blocks\" list with at least one block.");
+    if (!Array.isArray(body.blocks) || !body.blocks.some((b) => b && Array.isArray(b.exercises) && b.exercises.length)) errors.push("Needs at least one block with an exercise in it.");
     const ids = new Set();
     (body.blocks || []).forEach((b, i) => {
       const where = `Block ${b && b.key ? b.key : i + 1}`;
       if (!b || typeof b !== "object") { errors.push(`${where} isn't an object.`); return; }
       if (!b.name) warnings.push(`${where} has no name.`);
-      if (!Array.isArray(b.exercises) || !b.exercises.length) { errors.push(`${where} needs an "exercises" list.`); return; }
+      if (!Array.isArray(b.exercises)) { errors.push(`${where} needs an "exercises" list.`); return; }
+      if (!b.exercises.length) { warnings.push(`${where}${b.name ? " (" + b.name + ")" : ""} is empty and will be left out when you save.`); return; }
       b.exercises.forEach((ex, j) => {
         const w2 = `${where}, exercise ${j + 1}`;
         if (!ex || !ex.name) errors.push(`${w2} needs a "name".`);
@@ -221,8 +235,12 @@
   function startEdit(id) {
     const p = id ? state.programs.find((x) => x.id === id) : null;
     if (id && !p) return null;
-    const body = Object.assign({}, p ? p.body : TEMPLATE);
+    const body = JSON.parse(JSON.stringify(p ? p.body : TEMPLATE));
     delete body.id; delete body.date; delete body.title;
+    if (!p) {
+      const who = state.athleteFilter || (activeAthletes()[0] || {}).email;
+      body.short = "Session " + (state.programs.filter((x) => !who || x.athlete_email === who || !x.athlete_email).length + 1);
+    }
     state.edit = {
       id: p ? p.id : null,
       athlete: p ? p.athlete_email || "" : state.athleteFilter || (activeAthletes()[0] || {}).email || "",
@@ -230,10 +248,56 @@
       title: p ? p.title : "",
       published: p ? p.published : false,
       text: JSON.stringify(body, null, 1),
+      body, mode: "builder",
       hasFeedback: p ? state.notes.some((n) => n.session_id === p.id) || state.finishes.some((f) => f.session_id === p.id) : false,
     };
+    Object.assign(state.builder, { query: "", cat: "", target: null, open: new Set(), confirm: null });
     return state.edit;
   }
+
+  // Exercise library: exercises.json plus everything already done in published programs and the
+  // sessions/ files, so "Last" shows what this athlete did most recently.
+  function library() {
+    const e = state.edit || {};
+    const forAthlete = (p) => !e.athlete || !p.athlete_email || p.athlete_email === e.athlete;
+    const sessions = state.programs.filter((p) => p.published && p.id !== e.id && forAthlete(p)).map((p) => ({ date: p.date, blocks: p.body.blocks }));
+    const legacy = athletes().find((a) => a.legacy_files);
+    if (!e.athlete || !legacy || legacy.email === e.athlete) {
+      for (const f of state.fileSessions) if (f.id !== e.id && !state.programs.some((p) => p.id === f.id)) sessions.push({ date: f.date, blocks: f.blocks });
+    }
+    return PB.buildLibrary(state.librarySeed, sessions);
+  }
+  function setEditText(text) {
+    state.edit.text = text;
+    try { const b = JSON.parse(text); if (b && typeof b === "object" && !Array.isArray(b)) { if (!Array.isArray(b.blocks)) b.blocks = []; state.edit.body = b; } } catch (e) { /* keep the last good body */ }
+  }
+  function refreshCheck() {
+    const chk = checkProgram(state.edit.text);
+    const c = $("#program-check"); if (c) c.innerHTML = checkHTML(chk);
+    const pv = $("#program-preview"); if (pv && chk.body) pv.innerHTML = previewHTML(chk.body);
+    const save = $("#program-form .sticky-actions button.primary"); if (save) save.disabled = !!(chk.errors && chk.errors.length);
+    return chk;
+  }
+  function renderBuilder(opts = {}) {
+    const root = $("#builder-root"); if (!root || !state.edit) return;
+    const list = root.querySelector(".lib-list"), top = list ? list.scrollTop : 0, y = window.scrollY;
+    root.innerHTML = PB.render(state.edit.body, library(), state.builder);
+    const nl = root.querySelector(".lib-list"); if (nl) nl.scrollTop = top;
+    window.scrollTo(0, y);
+    if (opts.focus) { const el = root.querySelector(opts.focus); if (el) el.focus(); }
+    if (opts.flashRow) { const el = root.querySelector(`.bex[data-b="${opts.flashRow[0]}"][data-e="${opts.flashRow[1]}"]`); if (el) { el.classList.add("just-added"); el.scrollIntoView({ block: "nearest" }); } }
+  }
+  PB.mount(app, {
+    body: () => state.edit.body,
+    lib: () => library(),
+    ui: state.builder,
+    change(structural, opts) {
+      if (!state.edit) return;
+      state.edit.text = JSON.stringify(state.edit.body, null, 1);
+      if (structural) renderBuilder(opts);
+      refreshCheck();
+    },
+  });
 
   function renderProgram(v) {
     if (!state.edit || state.edit.id !== v.id) if (!startEdit(v.id)) return `<div class="empty"><strong>Program not found</strong><span><a href="#programs">Back to programs</a></span></div>`;
@@ -249,12 +313,13 @@
           <label class="file btn"><input type="file" accept=".json,application/json" id="program-file">Upload .json</label>
         </div>
         ${e.hasFeedback ? `<div class="banner warn">This program already has ticks or notes. Keep exercise ids the same, or that feedback won't line up any more.</div>` : ""}
-        <div class="split">
+        <div class="mode-tabs" role="tablist"><button type="button" role="tab" data-act="edit-mode" data-mode="builder" aria-selected="${e.mode === "builder"}">Builder</button><button type="button" role="tab" data-act="edit-mode" data-mode="json" aria-selected="${e.mode === "json"}">JSON</button></div>
+        ${e.mode === "builder" ? `<div id="builder-root">${PB.render(e.body, library(), state.builder)}</div><div id="program-check" class="builder-check">${checkHTML(chk)}</div>` : `<div class="split">
           <div class="card"><div class="card-head"><h3>Session JSON</h3><span class="extra">Same fields as the sessions/ files (see README)</span></div>
             <textarea id="program-json" spellcheck="false" aria-label="Session JSON">${esc(e.text)}</textarea>
             <div id="program-check">${checkHTML(chk)}</div></div>
           <div class="card"><div class="card-head"><h3>Preview</h3></div><div id="program-preview">${previewHTML(chk.body)}</div></div>
-        </div>
+        </div>`}
         <div class="row sticky-actions"><a class="btn" href="#programs">Cancel</a><button class="btn primary" ${chk.errors && chk.errors.length ? "disabled" : ""}>Save program</button></div>
       </form>`;
   }
@@ -430,9 +495,9 @@
         state.editingMember = null;
         await run(sb.from("members").update({ display_name: val(f, "name"), role: val(f, "role"), active: checked(f, "active") }).eq("email", email));
       } else if (f.id === "program-form") {
-        const e = state.edit; const chk = checkProgram($("#program-json").value);
+        const e = state.edit; const chk = checkProgram(e.text);
         if (chk.errors.length) { flash("Fix the problems in the JSON first."); return; }
-        const body = Object.assign({}, chk.body); delete body.id; delete body.date; delete body.title;
+        const body = withoutEmptyBlocks(chk.body); delete body.id; delete body.date; delete body.title;
         const row = { athlete_email: val(f, "athlete") || null, date: val(f, "date"), title: val(f, "title"), published: checked(f, "published"), body, created_by_email: state.me, updated_at: new Date().toISOString() };
         const q = e.id ? sb.from("programs").update(row).eq("id", e.id) : sb.from("programs").insert(Object.assign({ id: newProgramId(row.date) }, row));
         if (await run(q, "Program saved.")) { state.edit = null; location.hash = "programs"; }
@@ -487,12 +552,9 @@
   // Live check and preview while editing JSON.
   app.addEventListener("input", (ev) => {
     if (ev.target.id === "program-json" && state.edit) {
-      state.edit.text = ev.target.value;
-      const chk = checkProgram(ev.target.value);
-      $("#program-check").innerHTML = checkHTML(chk);
-      if (chk.body) $("#program-preview").innerHTML = previewHTML(chk.body);
-      const save = $("#program-form button:not([type=button])"); if (save) save.disabled = !!chk.errors.length;
-    } else if (ev.target.form && ev.target.form.id === "program-form" && state.edit) {
+      setEditText(ev.target.value);
+      refreshCheck();
+    } else if (ev.target.form && ev.target.form.id === "program-form" && state.edit && !ev.target.closest(".builder")) {
       const f = ev.target.form;
       Object.assign(state.edit, { athlete: val(f, "athlete"), date: val(f, "date"), title: f.elements.title.value, published: checked(f, "published") });
     }
@@ -509,13 +571,14 @@
         if (chk.body.date) f.elements.date.value = chk.body.date;
         Object.assign(state.edit, { title: f.elements.title.value, date: f.elements.date.value });
         const body = Object.assign({}, chk.body); delete body.id; delete body.date; delete body.title;
-        state.edit.text = JSON.stringify(body, null, 1);
-      } else state.edit.text = text;
+        setEditText(JSON.stringify(body, null, 1));
+      } else { state.edit.text = text; state.edit.mode = "json"; }
       render();
     }
-    if (el.form && el.form.id === "program-form" && state.edit) {
+    if (el.form && el.form.id === "program-form" && state.edit && !el.closest(".builder")) {
       const f = el.form;
       Object.assign(state.edit, { athlete: val(f, "athlete"), date: val(f, "date"), title: f.elements.title.value, published: checked(f, "published") });
+      if (el.name === "athlete" && state.edit.mode === "builder") renderBuilder();
     }
   });
 
@@ -528,6 +591,13 @@
     else if (act === "edit-member") { state.editingMember = btn.dataset.email; render(); }
     else if (act === "cancel-member") { state.editingMember = null; render(); }
     else if (act === "filter-athlete") { state.athleteFilter = btn.dataset.email; }
+    else if (act === "edit-mode" && state.edit) {
+      if (btn.dataset.mode === "builder") {
+        try { JSON.parse(state.edit.text); } catch (e) { flash("Fix the JSON first: " + e.message); return; }
+        setEditText(state.edit.text);
+      }
+      state.edit.mode = btn.dataset.mode; render();
+    }
     else if (act === "toggle-publish") {
       const p = state.programs.find((x) => x.id === id); if (!p) return;
       await run(sb.from("programs").update({ published: !p.published, updated_at: new Date().toISOString() }).eq("id", id), p.published ? "Unpublished." : "Published.");
@@ -595,7 +665,11 @@
     state.role = row ? row.role : null; state.name = row ? row.display_name : null;
     if (state.role !== "trainer") { state.loaded = false; render(); return; }
     try { await loadAll(); } catch (e) { state.error = e.message; render(); return; }
-    loadFileSessions().then((files) => { state.fileIds = files.map((s) => s.id); if (view().kind === "programs") softRender(); });
+    Promise.all([loadFileSessions(), fetch("exercises.json", { cache: "no-cache" }).then((r) => r.json()).catch(() => null)]).then(([files, seed]) => {
+      Object.assign(state, { fileIds: files.map((s) => s.id), fileSessions: files, librarySeed: seed });
+      if (view().kind === "programs") softRender();
+      else if (view().kind === "program" && state.edit && state.edit.mode === "builder") renderBuilder();
+    });
     if (channel) sb.removeChannel(channel);
     channel = sb.channel("trainer-console");
     for (const table of ["members", "programs", "notes", "session_finishes", "wods", "wod_results", "ticks"]) channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, scheduleReload);

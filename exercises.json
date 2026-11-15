@@ -1,0 +1,39 @@
+{
+ "_about": "Starter exercise library for the trainer console's program builder. Every exercise used in a saved program or a sessions/ file is added to the library automatically, so this list only needs the defaults. Fields are the same as a session exercise (see README), plus category.",
+ "categories": ["Prep", "Speed & Power", "Strength", "Accessories", "Resilience"],
+ "exercises": [
+  { "name": "Adductor Rock Backs", "category": "Prep", "sets": 2, "target": "10 reps", "search": "adductor rock back" },
+  { "name": "World's Greatest Stretch", "category": "Prep", "sets": 2, "target": "5 / side", "search": "worlds greatest stretch" },
+  { "name": "Deadbug", "category": "Prep", "sets": 2, "target": "10 reps", "search": "dead bug exercise" },
+  { "name": "Band Pull Apart", "category": "Prep", "sets": 2, "target": "15 reps", "search": "band pull apart" },
+  { "name": "Bootstrap Squats", "category": "Prep", "sets": 2, "target": "10 reps", "search": "bootstrap squat" },
+  { "name": "Iron Cross", "category": "Prep", "sets": 2, "target": "10 reps", "search": "iron cross mobility drill" },
+  { "name": "Calf Raises (double then single leg)", "category": "Prep", "sets": 2, "target": "10 + 10", "search": "single leg calf raise" },
+
+  { "name": "Pogo Jumps", "category": "Speed & Power", "sets": 3, "target": "15 reps", "search": "pogo jumps" },
+  { "name": "Falling Start Accels", "category": "Speed & Power", "sets": 3, "target": "10 m", "search": "falling start acceleration sprint" },
+  { "name": "Broad Jump", "category": "Speed & Power", "sets": 3, "target": "3 reps", "search": "standing broad jump" },
+  { "name": "Box Jump", "category": "Speed & Power", "sets": 3, "target": "3 reps", "search": "box jump step down" },
+  { "name": "Wall Drill – Double Switch", "category": "Speed & Power", "sets": 3, "target": "10 reps", "search": "wall drill double switch sprint" },
+
+  { "name": "BB Box Squat", "category": "Strength", "sets": 4, "target": "8 reps", "search": "barbell box squat" },
+  { "name": "Chin Ups", "category": "Strength", "sets": 4, "target": "6 reps", "search": "chin up" },
+  { "name": "Trap Bar Deadlift", "category": "Strength", "sets": 4, "target": "6 reps", "search": "trap bar deadlift" },
+  { "name": "BB Seal Row", "category": "Strength", "sets": 3, "target": "10 reps", "search": "barbell seal row" },
+  { "name": "DB Bulgarian Split Squat", "category": "Strength", "sets": 3, "target": "8 / leg", "search": "dumbbell bulgarian split squat" },
+  { "name": "DB Bench Press", "category": "Strength", "sets": 3, "target": "10 reps", "search": "dumbbell bench press" },
+  { "name": "Half-kneeling Landmine Press", "category": "Strength", "sets": 3, "target": "10 / side", "search": "half kneeling landmine press" },
+  { "name": "DB Walking Lunges", "category": "Strength", "sets": 3, "target": "16 reps", "search": "dumbbell walking lunges" },
+
+  { "name": "KB Romanian Deadlift", "category": "Accessories", "sets": 3, "target": "10 reps", "search": "kettlebell romanian deadlift" },
+  { "name": "DB Calf Raise – Standing", "category": "Accessories", "sets": 3, "target": "10 reps", "search": "standing dumbbell calf raise" },
+  { "name": "Single-leg DB Calf Raise", "category": "Accessories", "sets": 3, "target": "10 / side", "search": "single leg dumbbell calf raise" },
+  { "name": "Push Up", "category": "Accessories", "sets": 3, "target": "max reps", "search": "push up proper form" },
+  { "name": "Overhead Slam", "category": "Accessories", "sets": 3, "target": "6 reps", "search": "medicine ball overhead slam" },
+
+  { "name": "Bent Knee Copenhagen Plank", "category": "Resilience", "sets": 3, "target": "30 s / side", "search": "bent knee copenhagen plank" },
+  { "name": "Split Stance Cable Pallof Press", "category": "Resilience", "sets": 3, "target": "10 reps", "search": "split stance pallof press" },
+  { "name": "DB Farmers Carry", "category": "Resilience", "sets": 3, "target": "30 m", "search": "dumbbell farmers carry" },
+  { "name": "Ab Mat Sit Ups", "category": "Resilience", "sets": 3, "target": "15 reps", "search": "ab mat sit up" }
+ ]
+}
