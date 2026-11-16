@@ -56,6 +56,8 @@ Then run `supabase/002_skip_finish_notify.sql` the same way (fill in the ntfy to
 
 Then run `supabase/003_lift_maxes.sql`, and `supabase/004_trainer_console.sql` for the trainer console. 004 moves people into a `members` table: the notify admin email becomes the trainer and everyone else an athlete. It gives all existing ticks, notes, finishes and 1RMs to the existing athlete, so nothing is lost. Deploy the website first, then run it; both orders are safe for the existing athlete.
 
+To train as an athlete yourself on your trainer email, run `supabase/006_trainer_also_athlete.sql`, then tick **Trainer also trains** on your row in the console's Athletes tab. You then show up with the athletes, and can pick your own log on the athlete site.
+
 After 004, add and rename people in the console (Athletes). Before 004, only the emails in `allowed_emails` can see or change anything; to add someone, run `insert into allowed_emails values ('their@email.com');` in the SQL Editor.
 
 ### Data for other apps (iOS)

@@ -49,8 +49,9 @@
       info.names = {};
       if (!n.error) for (const r of n.data || []) if (r.email) info.names[r.email.toLowerCase()] = r.name;
       if (info.role === "trainer") {
-        const m = await sb.from("members").select("email, display_name, role, active, legacy_files").eq("role", "athlete").eq("active", true).order("display_name");
-        info.athletes = (m.data || []).map((r) => ({ email: r.email, name: r.display_name || r.email.split("@")[0], legacyFiles: !!r.legacy_files }));
+        const m = await sb.from("members").select("*").eq("active", true).order("display_name");
+        // Athletes, plus any trainer who also trains (members.also_athlete, from 006).
+        info.athletes = (m.data || []).filter((r) => r.role === "athlete" || r.also_athlete).map((r) => ({ email: r.email, name: r.display_name || r.email.split("@")[0], legacyFiles: !!r.legacy_files }));
         let saved = null;
         try { saved = localStorage.getItem(ATHLETE_KEY); } catch (e) {}
         const pick = info.athletes.find((a) => a.email === saved) || info.athletes[0];
