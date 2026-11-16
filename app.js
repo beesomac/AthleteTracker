@@ -530,7 +530,7 @@
     for (const w of wods) {
       const t = W.TYPES[w.score_type] || W.TYPES.reps;
       const rows = W.rank(w.score_type, state.board.filter((r) => r.wod_id === w.id));
-      const canLog = w.status === "open" && info.role === "athlete";
+      const canLog = w.status === "open" && (info.role === "athlete" || (isTrainer() && info.athlete === String(state.me || "").toLowerCase()));
       html += `<article class="board">
         <div class="board-head"><div><div class="ex-name">${esc(w.name)}</div>
           <div class="extra">${esc(t.label)}${w.time_cap_seconds ? ` · cap ${esc(W.format("time", w.time_cap_seconds))}` : ""}${w.wod_date ? ` · ${esc(fmtDate(w.wod_date))}` : ""}${w.status === "closed" ? " · closed" : ""}</div></div>
