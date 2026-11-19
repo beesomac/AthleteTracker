@@ -183,8 +183,8 @@
     short: "Session 1",
     summary: "",
     blocks: [
-      { key: "A", name: "Prep", rounds: "2 rounds", exercises: [{ id: "a1", name: "Deadbug", sets: 2, target: "10 reps", search: "dead bug exercise" }] },
-      { key: "B", name: "Strength", exercises: [{ id: "b1", name: "Trap Bar Deadlift", sets: 4, target: "6 reps", pct: 0.75, cue: "Even weight through both feet." }] },
+      { key: "A", name: "Prep", rounds: "2 rounds", exercises: [{ id: "a1", name: "Deadbug", sets: 2, target: "10 reps", log: "reps", search: "dead bug exercise" }] },
+      { key: "B", name: "Strength", exercises: [{ id: "b1", name: "Trap Bar Deadlift", sets: 4, target: "6 reps", log: "kg", pct: 0.75, cue: "Even weight through both feet." }] },
     ],
     next: [],
   };
@@ -210,6 +210,9 @@
         else ids.add(String(ex.id));
         if (ex && ex.sets != null && !(Number.isInteger(ex.sets) && ex.sets >= 1 && ex.sets <= 20)) errors.push(`${w2}: "sets" should be a whole number from 1 to 20.`);
         if (ex && ex.pct != null && !(ex.pct > 0 && ex.pct <= 1.2)) warnings.push(`${w2}: "pct" is a fraction, e.g. 0.75 for 75%.`);
+        if (ex && ex.video != null && !/^https:\/\//.test(String(ex.video))) errors.push(`${w2}: "video" should be a full https:// link.`);
+        if (ex && ex.log != null && !["kg", "reps", "secs", "tick"].includes(ex.log)) errors.push(`${w2}: "log" should be "kg" (weight), "reps" (bodyweight reps), "secs" (a timed hold) or "tick" (done/not done).`);
+        else if (ex && ex.log == null) warnings.push(`${w2}: no "log", so the athlete sees a ${/^\s*\d+(\s*[-–]\s*\d+)?\s*(s|sec|secs|seconds)\b/i.test(String(ex.target || "")) ? "seconds" : "kg"} box. Add "log": "kg", "reps", "secs" or "tick" to be sure.`);
       });
     });
     return { body, errors, warnings };
@@ -218,7 +221,7 @@
   function previewHTML(body) {
     if (!body || !Array.isArray(body.blocks)) return "";
     return `<div class="preview">${body.summary ? `<div class="status">${esc(body.summary)}</div>` : ""}${body.blocks.map((b) => `<div class="pv-block"><div class="block-head"><span class="letter">${esc(b.key || "")}</span><h3>${esc(b.name || "")}</h3>${b.rounds ? `<span class="rounds">${esc(b.rounds)}</span>` : ""}</div>
-      <ul>${(b.exercises || []).map((ex) => `<li><span>${esc(ex.name || "?")}${ex.status ? ` <span class="chip ${esc(ex.status)}">${esc(ex.status)}</span>` : ""}</span><span class="extra">${esc(ex.sets || 1)} × ${esc(ex.target || "")}${ex.pct ? ` · ${Math.round(ex.pct * 100)}%` : ""}</span></li>`).join("")}</ul></div>`).join("")}</div>`;
+      <ul>${(b.exercises || []).map((ex) => `<li><span>${esc(ex.name || "?")}${ex.status ? ` <span class="chip ${esc(ex.status)}">${esc(ex.status)}</span>` : ""}</span><span class="extra">${esc(ex.sets || 1)} × ${esc(ex.target || "")}${ex.pct ? ` · ${Math.round(ex.pct * 100)}%` : ""}${ex.log ? ` · logs ${esc({ kg: "kg", reps: "reps", secs: "seconds", tick: "tick" }[ex.log] || ex.log)}` : ""}</span></li>`).join("")}</ul></div>`).join("")}</div>`;
   }
 
   function startEdit(id) {

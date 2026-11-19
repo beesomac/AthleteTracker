@@ -36,7 +36,7 @@ Session fields:
 | `short`, `title` | Tab label (e.g. "Session 3") and the heading |
 | `summary` | The ankle check shown at the top |
 | `blocks[]` | `key` (A, B… or 1, 2…), `name`, optional `rounds` |
-| `blocks[].exercises[]` | `id`, `name`, `sets` (number of tick circles), `target` (e.g. "10 reps"), optional `status` (`new`, `back`, `swap`, `watch`, `hold`), `cue`, `extra` (RPE / previous loads), `search` (YouTube search words), `video` (a specific YouTube link, replaces the search), `pct` (e.g. `0.75` to suggest 75% of the lift's estimated 1RM), `pcts` (one % per set, e.g. `[0.7, 0.75, 0.8]`, so later sets scale up or down from the weight typed in), `suggestKg` (a fixed suggested weight) |
+| `blocks[].exercises[]` | `id`, `name`, `sets` (number of tick circles), `target` (e.g. "10 reps"), optional `status` (`new`, `back`, `swap`, `watch`, `hold`), `cue`, `extra` (RPE / previous loads), `search` (YouTube search words), `video` (a specific YouTube link, replaces the search; YouTube links also play inline), `log` (what each set asks for: `"kg"` a weight box, reps change on tap; `"reps"` a reps box for bodyweight work; `"secs"` a seconds box for holds; `"tick"` a plain done/not done item, e.g. a follow-along video. Without it, a target in seconds such as "30 s" gets a seconds box and anything else a kg box), `pct` (e.g. `0.75` to suggest 75% of the lift's estimated 1RM), `pcts` (one % per set, e.g. `[0.7, 0.75, 0.8]`, so later sets scale up or down from the weight typed in), `suggestKg` (a fixed suggested weight) |
 | `next[]` | Next progressions, listed at the bottom |
 | `planUrl`, `planLabel` | Link to the full plan, and its link text |
 | `summaryLabel` | Label for `summary` (default "Ankle check") |
