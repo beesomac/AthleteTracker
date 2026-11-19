@@ -4,10 +4,7 @@ import SwiftUI
 struct SessionsListView: View {
     @Environment(AppModel.self) private var model
 
-    private var today: String {
-        let c = Calendar.current.dateComponents([.year, .month, .day], from: .now)
-        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
-    }
+    private var today: String { SessionDate.today }
     private var upcoming: [ProgramRow] { model.programs.filter { $0.date >= today } }
     private var past: [ProgramRow] { model.programs.filter { $0.date < today }.reversed() }
 

@@ -4,7 +4,7 @@ import Foundation
 // See the README section "Data for other apps (iOS)".
 
 /// Result of the `whoami()` RPC: who the signed-in person is.
-struct WhoAmI: Decodable, Sendable {
+nonisolated struct WhoAmI: Decodable, Sendable {
     let email: String?
     let displayName: String?
     let role: String?
@@ -16,7 +16,7 @@ struct WhoAmI: Decodable, Sendable {
 }
 
 /// A row in `members` (only trainers can list everyone).
-struct Member: Decodable, Sendable, Identifiable, Hashable {
+nonisolated struct Member: Decodable, Sendable, Identifiable, Hashable {
     let email: String
     let displayName: String?
     let role: String
@@ -34,7 +34,7 @@ struct Member: Decodable, Sendable, Identifiable, Hashable {
 }
 
 /// A published program (one training session) from `programs`.
-struct ProgramRow: Decodable, Sendable, Identifiable, Hashable {
+nonisolated struct ProgramRow: Decodable, Sendable, Identifiable, Hashable {
     let id: String
     let athleteEmail: String?
     let date: String          // "YYYY-MM-DD"
@@ -66,7 +66,7 @@ struct ProgramRow: Decodable, Sendable, Identifiable, Hashable {
 }
 
 /// The session JSON (same shape as the files in sessions/).
-struct SessionBody: Decodable, Sendable {
+nonisolated struct SessionBody: Decodable, Sendable {
     var short: String?
     var title: String?
     var summary: String?
@@ -93,7 +93,7 @@ struct SessionBody: Decodable, Sendable {
     }
 }
 
-struct Block: Decodable, Sendable, Identifiable {
+nonisolated struct Block: Decodable, Sendable, Identifiable {
     var key: String
     var name: String?
     var rounds: String?
@@ -112,7 +112,7 @@ struct Block: Decodable, Sendable, Identifiable {
     }
 }
 
-struct Exercise: Decodable, Sendable, Identifiable {
+nonisolated struct Exercise: Decodable, Sendable, Identifiable {
     var id: String
     var name: String
     var sets: Double?
@@ -155,7 +155,7 @@ struct Exercise: Decodable, Sendable, Identifiable {
 }
 
 /// A row in `ticks`: which sets of one exercise are done, with what was entered.
-struct TickRow: Decodable, Sendable {
+nonisolated struct TickRow: Decodable, Sendable {
     let sessionId: String
     let exerciseId: String
     let sets: [String: SetEntry]
@@ -179,7 +179,7 @@ struct TickRow: Decodable, Sendable {
     }
 }
 
-struct SetEntry: Decodable, Sendable {
+nonisolated struct SetEntry: Decodable, Sendable {
     var reps: Double?
     var kg: Double?
     var secs: Double?
@@ -204,7 +204,7 @@ struct SetEntry: Decodable, Sendable {
 }
 
 /// A row in `session_finishes`.
-struct FinishRow: Decodable, Sendable {
+nonisolated struct FinishRow: Decodable, Sendable {
     let sessionId: String
     let finishedAt: String?
 
@@ -216,7 +216,7 @@ struct FinishRow: Decodable, Sendable {
 
 // MARK: - Helpers
 
-extension KeyedDecodingContainer {
+nonisolated extension KeyedDecodingContainer {
     /// A string, or a number written as a string. nil when missing or unusable.
     func lossyString(_ key: Key) -> String? {
         if let s = try? decode(String.self, forKey: key) { return s }
@@ -232,18 +232,29 @@ extension KeyedDecodingContainer {
     }
 }
 
-enum SessionFormat {
+nonisolated enum SessionFormat {
     static func number(_ d: Double) -> String {
-        d.rounded() == d ? String(Int(d)) : String(format: "%g", d)
+        d.formatted(.number.grouping(.never))
     }
 }
 
-enum SessionDate {
+nonisolated enum SessionDate {
     /// Parses "YYYY-MM-DD" as a local calendar day.
     static func parse(_ s: String) -> Date? {
         let parts = s.prefix(10).split(separator: "-").compactMap { Int($0) }
         guard parts.count == 3 else { return nil }
         return Calendar.current.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
+    }
+
+    /// Today as "YYYY-MM-DD" in the phone's time zone, to compare with program dates.
+    static var today: String {
+        Date.now.formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day())
+    }
+
+    /// Parses a timestamp from the database, with or without fractional seconds.
+    static func timestamp(_ s: String) -> Date? {
+        (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(s))
+            ?? (try? Date.ISO8601FormatStyle().parse(s))
     }
 
     static func label(_ s: String) -> String {

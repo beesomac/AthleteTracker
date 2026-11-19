@@ -60,10 +60,7 @@ struct SessionDetailView: View {
     }
 
     private func finishedLabel(_ iso: String) -> String {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let d = f.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
-        return d.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? ""
+        SessionDate.timestamp(iso)?.formatted(date: .abbreviated, time: .shortened) ?? ""
     }
 }
 

@@ -4,7 +4,7 @@ import Supabase
 
 /// App state: who is signed in, which athlete we're looking at, and their sessions.
 /// Reads only. Ticking sets from the phone comes in a later step.
-@MainActor
+/// Main-actor isolated by default (SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor).
 @Observable
 final class AppModel {
     enum Phase: Equatable {
