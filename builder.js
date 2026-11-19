@@ -1,23 +1,42 @@
-// Program builder for the trainer console: an exercise library of draggable blocks, and a
-// program canvas that edits the same session JSON as the sessions/ files (see README).
-// No database changes: the library is exercises.json plus every exercise already used in a
-// program or session file, so a new exercise joins the library once a program using it is saved.
+// Program builder for the trainer console: an exercise library and a WOD library of draggable
+// blocks, and a program canvas that edits the same session JSON as the sessions/ files (see README).
+// No database changes: the exercise library is exercises.json (grouped by movement family) plus
+// every exercise already used in a program or session file; the WOD library is wods.json.
 (function () {
   const STATUSES = ["", "new", "back", "swap", "watch", "hold"];
-  const OPTIONAL = ["status", "cue", "extra", "search", "video"];
+  const OPTIONAL = ["status", "cue", "extra", "search", "video", "log"];
+  const LOGS = [["", "auto"], ["kg", "kg"], ["reps", "reps"], ["secs", "secs"], ["tick", "tick"]];
 
   function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
   const norm = (s) => String(s || "").toLowerCase().replace(/[–—]/g, "-").replace(/\s+/g, " ").trim();
   function shortDate(iso) {
     try { return new Date(String(iso).slice(0, 10) + "T12:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" }); } catch (e) { return iso; }
   }
-  function categoryOf(blockName) {
+  // Movement family for an exercise that isn't in exercises.json: by its name first, then by the
+  // name of the block it was in.
+  const FAMILY_BY_NAME = [
+    [/snatch(?!.*(db|dumbbell|kb|kettlebell))|overhead squat|sots/, "Snatch"],
+    [/clean(?!.*(db|dumbbell|kb|kettlebell))/, "Clean"],
+    [/jerk|push press|strict press|shoulder press|overhead press|landmine press|to overhead/, "Jerk & Overhead"],
+    [/muscle.?up|pull.?up|chin.?up|rope climb|toes.?to|knees.?to|handstand|hspu|wall walk|ring dip|bar dip|\bdips?\b|push.?up|pistol|burpee|l.?sit|double.?under|ring support/, "Gymnastics"],
+    [/\b(kb|kettlebell|db|dumbbell)\b.*(snatch|swing|thruster|clean|get.?up)|devil press|swing|get.?up/, "Kettlebell & Dumbbell"],
+    [/squat|lunge|thruster|wall.?ball|step.?up|split/, "Squat & Lunge"],
+    [/deadlift|\brdl\b|good morning|hip thrust|back extension|high pull/, "Deadlift & Hinge"],
+    [/bench|row\b(?!.*(cal|erg|m\b))|pulldown|face pull|seal row/, "Press & Pull"],
+    [/\brun\b|sprint|\brow\b|erg|bike|single.?under|shuttle/, "Cardio"],
+    [/carry|sled|yoke|sandbag/, "Carries & Strongman"],
+    [/sit.?up|plank|hollow|arch|v.?up|rollout|leg raise|pallof|dead ?bug/, "Core"],
+    [/jump|pogo|hop|bound|throw|toss|slam|accel/, "Speed & Power"],
+  ];
+  function categoryOf(blockName, exName) {
+    const e = norm(exName);
+    if (e) for (const [re, fam] of FAMILY_BY_NAME) if (re.test(e)) return fam;
     const n = norm(blockName);
-    if (/prep|warm|mobil/.test(n)) return "Prep";
+    if (/prep|warm|mobil/.test(n)) return "Prep & Mobility";
     if (/speed|accel|power|plyo|jump|sprint/.test(n)) return "Speed & Power";
-    if (/strength/.test(n)) return "Strength";
-    if (/access/.test(n)) return "Accessories";
-    if (/resil|core|conditioning|carry/.test(n)) return "Resilience";
+    if (/access|tricep|grip|wrist/.test(n)) return "Accessories";
+    if (/resil/.test(n)) return "Resilience";
+    if (/core|compression/.test(n)) return "Core";
     return "Other";
   }
   const dose = (ex) => `${ex.sets || 1} × ${ex.target || "–"}`;
@@ -36,12 +55,15 @@
         const key = norm(ex.name);
         let item = byKey.get(key);
         if (!item) {
-          item = { key, name: ex.name, category: categoryOf(b.name), sets: ex.sets || 3, target: ex.target || "", uses: 0, last: null };
+          if (b.wod) continue; // movements from a dropped-in WOD aren't library exercises
+          item = { key, name: ex.name, category: categoryOf(b.name, ex.name), sets: ex.sets || 3, target: ex.target || "", uses: 0, last: null };
           if (ex.search) item.search = ex.search;
+          if (ex.log) item.log = ex.log;
           if (ex.video) item.video = ex.video;
           byKey.set(key, item);
         }
         if (!item.search && ex.search) item.search = ex.search;
+        if (!item.log && ex.log) item.log = ex.log;
         item.uses++;
         // "hold" means it was written in but not done, so it doesn't count as the last time.
         if (ex.status !== "hold") item.last = { date: s.date, sets: ex.sets, target: ex.target, extra: ex.extra || "" };
@@ -75,7 +97,49 @@
     if (item.cue) ex.cue = item.cue;
     if (item.search) ex.search = item.search;
     if (item.video) ex.video = item.video;
+    if (item.log) ex.log = item.log;
     return ex;
+  }
+
+  // ─── WODs ───────────────────────────────────────────────────────────────────────────────
+  // wods.json: { groups, primaries, wods: [{ id, name, group, year?, primary, format, score, cap?,
+  // rounds?, description, movements: [{ name, target, log? }] }] }
+  function fmtCap(sec) { const m = Math.floor(sec / 60), s = sec % 60; return m + ":" + String(s).padStart(2, "0"); }
+  const wodMeta = (w) => [w.format, w.cap ? "cap " + fmtCap(w.cap) : ""].filter(Boolean).join(" · ");
+  // Letters stay in order (A, B, C…) when a block goes in the middle. Only called when every
+  // block key is a single letter; exercise ids don't change, so feedback still lines up.
+  function reletter(body) {
+    if (body.blocks.length > 26) return false;
+    body.blocks.forEach((b, i) => { b.key = String.fromCharCode(65 + i); });
+    return true;
+  }
+  // A WOD becomes one block: the movements as exercises (one set each, or one per round), the
+  // format and cap as the block's rounds line, and the whole workout as the block note.
+  function wodBlock(body, w, at) {
+    const blocks = body.blocks;
+    if (at == null || at > blocks.length) at = blocks.length;
+    const b = { key: "", name: w.name, rounds: wodMeta(w), note: w.description, wod: w.id, exercises: [] };
+    blocks.splice(at, 0, b);
+    if (!(blocks.every((x) => /^[A-Z]?$/.test(String(x.key || ""))) && reletter(body))) b.key = nextKey(body);
+    for (const m of w.movements || []) {
+      const ex = { id: newId(body, b), name: m.name, sets: w.rounds || 1, target: m.target, log: m.log || "tick", search: m.name.replace(/[→/].*$/, "").trim().toLowerCase() };
+      b.exercises.push(ex);
+    }
+    return at;
+  }
+  function wodMatches(w, q) { return !q || norm(w.name).includes(q) || norm(w.description).includes(q) || norm(w.primary).includes(q); }
+  // [{ title, wods }] for a group id ("open", "girls", "hero", "test") or "movement".
+  function wodSections(seed, group, query) {
+    const q = norm(query), all = ((seed && seed.wods) || []).filter((w) => wodMatches(w, q));
+    if (q && !group) return [{ title: "Matches", wods: all }];
+    if (group === "movement") return ((seed && seed.primaries) || []).map((p) => ({ title: p, wods: all.filter((w) => w.primary === p) })).filter((s) => s.wods.length);
+    const inGroup = all.filter((w) => w.group === group);
+    if (group === "open") {
+      const years = [...new Set(inGroup.map((w) => w.year))].sort((a, b) => b - a);
+      return years.map((y) => ({ title: "Open " + y, wods: inGroup.filter((w) => w.year === y) }));
+    }
+    const g = ((seed && seed.groups) || []).find((x) => x.id === group);
+    return inGroup.length ? [{ title: g ? g.label : group, wods: inGroup }] : [];
   }
 
   // ─── rendering ──────────────────────────────────────────────────────────────────────────
@@ -86,7 +150,22 @@
       <span class="lib-text"><b>${esc(it.name)}</b><span class="extra">${esc(dose(it))}</span>${last}</span>
       <button type="button" class="add" data-bact="add-lib" data-lib="${esc(it.key)}" aria-label="Add ${esc(it.name)} to ${esc(targetLabel)}">+</button></li>`;
   }
+  function wodItemHTML(w, targetLabel) {
+    const first = String(w.description || "").split("\n").slice(1, 4).join(" · ");
+    return `<li class="lib-item wod-item" draggable="true" data-wod="${esc(w.id)}" title="${esc(w.description)}">
+      <span class="grip" aria-hidden="true"></span>
+      <span class="lib-text"><b>${esc(w.name)}</b><span class="extra">${esc(wodMeta(w))} · ${esc(w.primary)}</span><span class="lib-last never">${esc(first)}</span></span>
+      <button type="button" class="add" data-bact="add-wod" data-wod="${esc(w.id)}" aria-label="Add ${esc(w.name)} after ${esc(targetLabel)}">+</button></li>`;
+  }
+  function wodListHTML(lib, ui, body) {
+    const tb = (body.blocks || [])[targetIndex(body, ui)];
+    const targetLabel = tb ? `block ${tb.key || ""}` : "the program";
+    const secs = wodSections(lib.wods, ui.query ? "" : ui.wodGroup || "open", ui.query);
+    const html = secs.map((s) => `<div class="lib-group"><h4>${esc(s.title)}</h4><ul>${s.wods.map((w) => wodItemHTML(w, targetLabel)).join("")}</ul></div>`).join("");
+    return html || `<div class="extra lib-empty">${lib.wods ? `No WOD matches “${esc(ui.query)}”.` : "Loading WODs…"}</div>`;
+  }
   function libListHTML(lib, ui, body) {
+    if (ui.libTab === "wod") return wodListHTML(lib, ui, body);
     const q = norm(ui.query);
     const tb = (body.blocks || [])[targetIndex(body, ui)];
     const targetLabel = tb ? `block ${tb.key || ""}` : "a new block";
@@ -110,6 +189,7 @@
       <div class="bex-main">
         <input class="ex-name" data-ef="name" value="${esc(ex.name)}" aria-label="Exercise name" placeholder="Exercise name">
         <span class="dose"><input class="ex-sets" data-ef="sets" type="number" min="1" max="20" inputmode="numeric" value="${esc(ex.sets || "")}" aria-label="Sets"><span class="x">×</span><input class="ex-target" data-ef="target" value="${esc(ex.target)}" aria-label="Target" placeholder="10 reps"></span>
+        <select class="ex-log" data-ef="log" aria-label="Athlete logs" title="What the athlete enters for each set">${LOGS.map(([v, l]) => `<option value="${v}" ${(ex.log || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select>
         <select data-ef="status" aria-label="Status">${STATUSES.map((s) => `<option value="${s}" ${(ex.status || "") === s ? "selected" : ""}>${s || "–"}</option>`).join("")}</select>
         <span class="bex-btns"><button type="button" class="icon${open ? " on" : ""}" data-bact="more" aria-expanded="${open ? "true" : "false"}" title="Cue, notes and video">${ex.cue || ex.extra ? "Cue •" : "Cue"}</button><button type="button" class="icon" data-bact="del-ex" aria-label="Remove ${esc(ex.name)}">✕</button></span>
       </div>
@@ -135,18 +215,23 @@
           <button type="button" class="icon danger" data-bact="del-block">${confirm ? "Delete block?" : "✕"}</button>
         </span>
       </div>
+      ${b.note != null ? `<textarea class="bnote" data-bf="note" rows="${Math.min(8, String(b.note).split("\n").length + 1)}" aria-label="Block note" placeholder="Shown to the athlete above this block">${esc(b.note)}</textarea>` : ""}
       <ol class="drop" data-b="${bi}">${exs.map((ex, ei) => exHTML(ex, bi, ei, ui)).join("")}${exs.length ? "" : `<li class="drop-hint">Drag exercises here</li>`}</ol>
-      <div class="bblock-foot"><button type="button" class="link" data-bact="new-ex">+ New exercise</button>${isTarget ? `<span class="extra">+ in the library adds here</span>` : `<button type="button" class="link" data-bact="target">Add library picks here</button>`}</div>
+      <div class="bblock-foot"><button type="button" class="link" data-bact="new-ex">+ New exercise</button>${b.note == null ? `<button type="button" class="link" data-bact="add-note">+ Note</button>` : ""}${isTarget ? `<span class="extra">+ in the library adds here</span>` : `<button type="button" class="link" data-bact="target">Add library picks here</button>`}</div>
     </section>`;
   }
+  const WOD_TABS = [["open", "Open"], ["girls", "Girls"], ["hero", "Heroes"], ["test", "Tests"], ["movement", "By movement"]];
   function render(body, lib, ui) {
     const blocks = body.blocks || [];
     const t = targetIndex(body, ui);
     return `<div class="builder">
       <aside class="card lib">
-        <div class="card-head"><h3>Exercises</h3><span class="extra">Drag into a block, or press +</span></div>
-        <input type="search" class="lib-search" placeholder="Search exercises" value="${esc(ui.query || "")}" aria-label="Search exercises">
-        <div class="lib-cats">${["", ...lib.categories].map((c) => `<button type="button" class="chip-btn${(ui.cat || "") === c ? " on" : ""}" data-bact="cat" data-cat="${esc(c)}">${esc(c || "All")}</button>`).join("")}</div>
+        <div class="lib-tabs" role="tablist"><button type="button" role="tab" data-bact="lib-tab" data-tab="ex" aria-selected="${ui.libTab !== "wod"}">Exercises</button><button type="button" role="tab" data-bact="lib-tab" data-tab="wod" aria-selected="${ui.libTab === "wod"}">WODs</button></div>
+        <span class="extra">${ui.libTab === "wod" ? "Drag a WOD between blocks, or press + to add it after the highlighted block" : "Drag into a block, or press +"}</span>
+        <input type="search" class="lib-search" placeholder="${ui.libTab === "wod" ? "Search WODs or movements" : "Search exercises"}" value="${esc(ui.query || "")}" aria-label="Search">
+        ${ui.libTab === "wod"
+          ? `<div class="lib-cats">${WOD_TABS.map(([g, l]) => `<button type="button" class="chip-btn${(ui.wodGroup || "open") === g ? " on" : ""}" data-bact="wod-group" data-group="${g}">${l}</button>`).join("")}</div>`
+          : `<div class="lib-cats">${["", ...lib.categories].map((c) => `<button type="button" class="chip-btn${(ui.cat || "") === c ? " on" : ""}" data-bact="cat" data-cat="${esc(c)}">${esc(c || "All")}</button>`).join("")}</div>`}
         <div class="lib-list">${libListHTML(lib, ui, body)}</div>
       </aside>
       <div class="canvas">
@@ -167,7 +252,7 @@
     let drag = null;
     const inBuilder = (el) => el && el.closest && el.closest(".builder");
     const indexOf = (el) => ({ b: Number(el.dataset.b), e: el.dataset.e == null ? null : Number(el.dataset.e) });
-    function clearMarks() { root.querySelectorAll(".drop-before,.drop-end,.drop-over,.dragging").forEach((x) => x.classList.remove("drop-before", "drop-end", "drop-over", "dragging")); }
+    function clearMarks() { root.querySelectorAll(".drop-before,.drop-end,.drop-over,.dragging,.wod-before,.wod-after").forEach((x) => x.classList.remove("drop-before", "drop-end", "drop-over", "dragging", "wod-before", "wod-after")); }
     function insertAt(list, y) {
       const rows = [...list.querySelectorAll(":scope > .bex")];
       for (let i = 0; i < rows.length; i++) { const r = rows[i].getBoundingClientRect(); if (y < r.top + r.height / 2) return i; }
@@ -189,11 +274,12 @@
     root.addEventListener("dragstart", (ev) => {
       if (!inBuilder(ev.target)) return;
       const lib = ev.target.closest(".lib-item"), row = ev.target.closest(".bex");
-      if (lib) drag = { kind: "lib", key: lib.dataset.lib };
+      if (lib && lib.dataset.wod) drag = { kind: "wod", id: lib.dataset.wod };
+      else if (lib) drag = { kind: "lib", key: lib.dataset.lib };
       else if (row) drag = Object.assign({ kind: "ex" }, indexOf(row));
       else return;
-      ev.dataTransfer.effectAllowed = drag.kind === "lib" ? "copy" : "move";
-      ev.dataTransfer.setData("text/plain", drag.kind === "lib" ? lib.dataset.lib : "exercise");
+      ev.dataTransfer.effectAllowed = drag.kind === "ex" ? "move" : "copy";
+      ev.dataTransfer.setData("text/plain", drag.kind === "lib" ? lib.dataset.lib : drag.kind === "wod" ? drag.id : "exercise");
       (lib || row).classList.add("dragging");
     });
     // Rows hold text fields, so a row only drags when grabbed outside them (text stays selectable).
@@ -203,6 +289,13 @@
     });
     root.addEventListener("dragover", (ev) => {
       if (!drag) return;
+      if (drag.kind === "wod") {
+        const t = wodTarget(ev); if (!t) return;
+        ev.preventDefault(); ev.dataTransfer.dropEffect = "copy";
+        root.querySelectorAll(".drop-before,.drop-end,.drop-over,.wod-before,.wod-after").forEach((x) => x.classList.remove("drop-before", "drop-end", "drop-over", "wod-before", "wod-after"));
+        t.el.classList.add(t.el.classList.contains("new-block") ? "drop-over" : t.after ? "wod-after" : "wod-before");
+        return;
+      }
       const list = ev.target.closest && ev.target.closest(".builder .drop"); if (!list) return;
       ev.preventDefault();
       ev.dataTransfer.dropEffect = drag.kind === "lib" ? "copy" : "move";
@@ -215,9 +308,27 @@
     root.addEventListener("dragleave", (ev) => {
       const list = ev.target.closest && ev.target.closest(".builder .drop");
       if (list && !list.contains(ev.relatedTarget)) list.classList.remove("drop-over", "drop-end");
+      const blk = ev.target.closest && ev.target.closest(".builder .bblock");
+      if (blk && !blk.contains(ev.relatedTarget)) blk.classList.remove("wod-before", "wod-after");
     });
+    // Where a dragged WOD lands: before or after the block under the pointer, or at the end.
+    function wodTarget(ev) {
+      const el = ev.target.closest && (ev.target.closest(".builder .bblock") || ev.target.closest(".builder .new-block"));
+      if (!el) return null;
+      if (el.classList.contains("new-block")) return { el, at: ctx.body().blocks.length };
+      const r = el.getBoundingClientRect(), after = ev.clientY > r.top + r.height / 2;
+      return { el, after, at: Number(el.dataset.b) + (after ? 1 : 0) };
+    }
     root.addEventListener("drop", (ev) => {
       if (!drag) return;
+      if (drag.kind === "wod") {
+        const t = wodTarget(ev); if (!t) return;
+        ev.preventDefault();
+        const w = ((ctx.lib().wods || {}).wods || []).find((x) => x.id === drag.id);
+        drag = null; clearMarks(); if (!w) return;
+        const body = ctx.body(); ctx.ui.target = wodBlock(body, w, t.at);
+        return ctx.change(true, { flashBlock: ctx.ui.target });
+      }
       const list = ev.target.closest && ev.target.closest(".builder .drop"); if (!list) return;
       ev.preventDefault();
       const body = ctx.body();
@@ -253,6 +364,7 @@
       if (el.dataset.bf) {
         const b = body.blocks[Number(el.closest(".bblock").dataset.b)];
         if (el.dataset.bf === "rounds" && !el.value.trim()) delete b.rounds; else b[el.dataset.bf] = el.value;
+        if (el.dataset.bf === "note") el.rows = Math.min(8, el.value.split("\n").length + 1);
         return ctx.change(false);
       }
       if (el.dataset.ef) {
@@ -284,6 +396,15 @@
       const row = btn.closest(".bex"), ei = row ? Number(row.dataset.e) : null;
       if (act !== "del-block") ui.confirm = null;
       if (act === "cat") { ui.cat = btn.dataset.cat; return ctx.change(true); }
+      if (act === "lib-tab") { ui.libTab = btn.dataset.tab; ui.query = ""; return ctx.change(true); }
+      if (act === "wod-group") { ui.wodGroup = btn.dataset.group; ui.query = ""; return ctx.change(true); }
+      if (act === "add-wod") {
+        const w = ((ctx.lib().wods || {}).wods || []).find((x) => x.id === btn.dataset.wod); if (!w) return;
+        const t = targetIndex(body, ui);
+        ui.target = wodBlock(body, w, t + 1);
+        return ctx.change(true, { flashBlock: ui.target });
+      }
+      if (act === "add-note") { body.blocks[bi].note = ""; return ctx.change(true, { focus: `.bblock[data-b="${bi}"] .bnote` }); }
       if (act === "add-lib") {
         const item = ctx.lib().items.find((i) => i.key === btn.dataset.lib); if (!item) return;
         let t = targetIndex(body, ui);
@@ -322,5 +443,5 @@
     });
   }
 
-  window.ProgramBuilder = { buildLibrary, render, libListHTML, mount, categoryOf };
+  window.ProgramBuilder = { buildLibrary, render, libListHTML, mount, categoryOf, wodBlock, wodSections, wodMeta };
 })();

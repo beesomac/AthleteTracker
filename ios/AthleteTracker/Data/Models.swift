@@ -97,17 +97,20 @@ nonisolated struct Block: Decodable, Sendable, Identifiable {
     var key: String
     var name: String?
     var rounds: String?
+    /// Free text shown above the block, e.g. the full write-up of a WOD from the console's library.
+    var note: String?
     var exercises: [Exercise]
 
     var id: String { key + (name ?? "") }
 
-    enum CodingKeys: String, CodingKey { case key, name, rounds, exercises }
+    enum CodingKeys: String, CodingKey { case key, name, rounds, note, exercises }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         key = c.lossyString(.key) ?? ""
         name = c.lossyString(.name)
         rounds = c.lossyString(.rounds)
+        note = c.lossyString(.note)
         exercises = (try? c.decode([Exercise].self, forKey: .exercises)) ?? []
     }
 }

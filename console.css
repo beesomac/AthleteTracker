@@ -124,7 +124,7 @@ label.file input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .bblock-head{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .builder .bkey{width:40px;text-align:center;font:700 16px var(--display);background:var(--ink);color:var(--surface);border-color:var(--ink)}
 .builder .bname{flex:1 1 160px;font:600 18px var(--display);letter-spacing:.01em}
-.builder .brounds{width:110px;font-size:13px}
+.builder .brounds{width:170px;font-size:13px}
 .bblock-btns{display:flex;gap:2px;margin-left:auto}
 .drop{list-style:none;margin:0;padding:4px;display:grid;gap:5px;border:1.5px dashed transparent;border-radius:9px;min-height:44px;transition:background .1s}
 .drop.drop-over{border-color:var(--accent);background:var(--accent-soft)}
@@ -153,3 +153,33 @@ label.file input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .builder-check{margin-top:12px}
 .canvas-top{display:grid;grid-template-columns:140px 1fr;gap:10px}
 @media (max-width:460px){.canvas-top{grid-template-columns:1fr}}
+
+/* Library: exercises by movement family, WODs (Open, Girls, Heroes, tests, by movement). */
+.mode-tabs a{padding:7px 16px;font:600 13px var(--body);color:var(--muted);text-decoration:none}
+.mode-tabs a[aria-selected="true"]{background:var(--ink);color:var(--surface)}
+.mode-tabs a[aria-selected="true"] .extra{color:inherit;opacity:.7}
+.lib-tabs{display:flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.lib-tabs button{flex:1;border:0;background:none;padding:6px 10px;font:600 13px var(--body);color:var(--muted);cursor:pointer}
+.lib-tabs button[aria-selected="true"]{background:var(--ink);color:var(--surface)}
+.wod-item .lib-last{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.builder .ex-log{width:auto;font-size:12.5px;padding:5px 4px;color:var(--muted)}
+.builder .bnote{font-size:13px;line-height:1.4;background:var(--bg)}
+.bblock.wod-before{box-shadow:0 -4px 0 var(--accent)}
+.bblock.wod-after{box-shadow:0 4px 0 var(--accent)}
+.bblock.just-added{animation:justadded-block 1.2s ease-out}
+@keyframes justadded-block{from{background:var(--accent-soft)}to{background:var(--surface)}}
+.block-note{white-space:pre-line;font-size:13px;color:var(--muted);margin:0 0 6px}
+.libp-tools{display:grid;gap:10px;margin:14px 0}
+.libp-tools input[type=search]{max-width:420px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--ink);font:500 15px var(--body);padding:8px 10px}
+.libp-group{margin:0 0 22px}
+.libp-group h3{margin:0 0 8px;font:600 20px var(--display);letter-spacing:.01em}
+.libp-ex{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:6px}
+.libp-ex li{display:grid;gap:1px;background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:14px}
+.libp-ex li a{font-size:12px;justify-self:start}
+.libp-wods{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}
+.wod-card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px;display:grid;gap:6px;align-content:start}
+.wod-card-head{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.wod-card-head b{font:600 19px var(--display)}
+.wod-desc{font-size:13.5px;line-height:1.45}
+.wod-card .row{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.wod-card .btn{font-size:12.5px;padding:5px 10px}

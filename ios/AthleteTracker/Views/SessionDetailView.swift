@@ -33,6 +33,9 @@ struct SessionDetailView: View {
 
             ForEach(program.body.blocks) { block in
                 Section {
+                    if let note = block.note, !note.isEmpty {
+                        Text(note).font(.callout).foregroundStyle(.secondary)
+                    }
                     ForEach(block.exercises) { ex in
                         ExerciseRow(exercise: ex, tick: model.tick(program, ex))
                     }

@@ -1,4 +1,4 @@
-// Trainer console: athletes, programs, feedback and WOD leaderboards.
+// Trainer console: athletes, programs, exercise and WOD library, feedback and WOD leaderboards.
 // Reads and writes the same Supabase tables as the athlete site (see supabase/004_trainer_console.sql);
 // row-level security only lets members with role "trainer" change any of it.
 (function () {
@@ -12,8 +12,9 @@
     members: [], programs: [], notes: [], finishes: [], wods: [], results: [],
     login: {}, athleteFilter: "", notesFilter: "open", confirm: null,
     editingMember: null, edit: null, reply: null, editingWod: false, fileIds: null,
-    fileSessions: [], librarySeed: null,
-    builder: { query: "", cat: "", target: null, open: new Set(), confirm: null },
+    fileSessions: [], librarySeed: null, wodSeed: null, wodDraft: null, pendingWod: null,
+    builder: { query: "", cat: "", target: null, open: new Set(), confirm: null, libTab: "ex", wodGroup: "open" },
+    libPage: { query: "", cat: "", wodGroup: "open", open: null },
   };
   const PB = window.ProgramBuilder;
 
@@ -88,6 +89,8 @@
     if (h === "program-new") return { kind: "program", id: null };
     if (h.startsWith("program-")) return { kind: "program", id: decodeURIComponent(h.slice(8)) };
     if (h === "feedback") return { kind: "feedback" };
+    if (h === "library") return { kind: "library", tab: "ex" };
+    if (h === "library-wods") return { kind: "library", tab: "wod" };
     if (h === "boards") return { kind: "boards" };
     if (h.startsWith("board-")) return { kind: "board", id: h.slice(6) };
     return { kind: "athletes" };
@@ -100,6 +103,7 @@
     const items = [
       ["athletes", "Athletes", v === "athletes"],
       ["programs", "Programs", v === "programs" || v === "program"],
+      ["library", "Library", v === "library"],
       ["feedback", `Feedback${open ? ` <span class="count">${open}</span>` : ""}`, v === "feedback"],
       ["boards", "Leaderboards", v === "boards" || v === "board"],
     ];
@@ -198,7 +202,11 @@
   // Empty blocks are fine while building; they're left out when the program is saved.
   function withoutEmptyBlocks(body) {
     const b = Object.assign({}, body);
-    if (Array.isArray(b.blocks)) b.blocks = b.blocks.filter((x) => !(x && Array.isArray(x.exercises) && !x.exercises.length));
+    if (Array.isArray(b.blocks)) b.blocks = b.blocks.filter((x) => !(x && Array.isArray(x.exercises) && !x.exercises.length))
+      .map((x) => { if (x && x.note != null && !String(x.note).trim()) { const y = Object.assign({}, x); delete y.note; return y; } return x; });
+    // Lettered blocks close up after empty ones are dropped (A, C, E → A, B, C). Ids don't change.
+    if (Array.isArray(b.blocks) && b.blocks.length <= 26 && b.blocks.every((x) => x && /^[A-Z]$/.test(String(x.key || ""))))
+      b.blocks = b.blocks.map((x, i) => Object.assign({}, x, { key: String.fromCharCode(65 + i) }));
     return b;
   }
 
@@ -234,7 +242,7 @@
 
   function previewHTML(body) {
     if (!body || !Array.isArray(body.blocks)) return "";
-    return `<div class="preview">${body.summary ? `<div class="status">${esc(body.summary)}</div>` : ""}${body.blocks.map((b) => `<div class="pv-block"><div class="block-head"><span class="letter">${esc(b.key || "")}</span><h3>${esc(b.name || "")}</h3>${b.rounds ? `<span class="rounds">${esc(b.rounds)}</span>` : ""}</div>
+    return `<div class="preview">${body.summary ? `<div class="status">${esc(body.summary)}</div>` : ""}${body.blocks.map((b) => `<div class="pv-block"><div class="block-head"><span class="letter">${esc(b.key || "")}</span><h3>${esc(b.name || "")}</h3>${b.rounds ? `<span class="rounds">${esc(b.rounds)}</span>` : ""}</div>${b.note ? `<div class="block-note">${esc(b.note)}</div>` : ""}
       <ul>${(b.exercises || []).map((ex) => `<li><span>${esc(ex.name || "?")}${ex.status ? ` <span class="chip ${esc(ex.status)}">${esc(ex.status)}</span>` : ""}</span><span class="extra">${esc(ex.sets || 1)} × ${esc(ex.target || "")}${ex.pct ? ` · ${Math.round(ex.pct * 100)}%` : ""}${ex.log ? ` · logs ${esc({ kg: "kg", reps: "reps", secs: "seconds", tick: "tick" }[ex.log] || ex.log)}` : ""}</span></li>`).join("")}</ul></div>`).join("")}</div>`;
   }
 
@@ -246,7 +254,11 @@
     if (!p) {
       const who = state.athleteFilter || (activeAthletes()[0] || {}).email;
       body.short = "Session " + (state.programs.filter((x) => !who || x.athlete_email === who || !x.athlete_email).length + 1);
+      // "New program with this WOD" from the library: the WOD goes in as block A's neighbour, after Prep.
+      const w = state.pendingWod && state.wodSeed && state.wodSeed.wods.find((x) => x.id === state.pendingWod);
+      if (w) PB.wodBlock(body, w, 1);
     }
+    state.pendingWod = null;
     state.edit = {
       id: p ? p.id : null,
       athlete: p ? p.athlete_email || "" : state.athleteFilter || (activeAthletes()[0] || {}).email || "",
@@ -258,6 +270,7 @@
       hasFeedback: p ? state.notes.some((n) => n.session_id === p.id) || state.finishes.some((f) => f.session_id === p.id) : false,
     };
     Object.assign(state.builder, { query: "", cat: "", target: null, open: new Set(), confirm: null });
+    if (p == null && body.blocks.some((b) => b.wod)) Object.assign(state.builder, { target: body.blocks.findIndex((b) => b.wod), libTab: "wod" });
     return state.edit;
   }
 
@@ -271,7 +284,7 @@
     if (!e.athlete || !legacy || legacy.email === e.athlete) {
       for (const f of state.fileSessions) if (f.id !== e.id && !state.programs.some((p) => p.id === f.id)) sessions.push({ date: f.date, blocks: f.blocks });
     }
-    return PB.buildLibrary(state.librarySeed, sessions);
+    return Object.assign(PB.buildLibrary(state.librarySeed, sessions), { wods: state.wodSeed });
   }
   function setEditText(text) {
     state.edit.text = text;
@@ -291,6 +304,7 @@
     const nl = root.querySelector(".lib-list"); if (nl) nl.scrollTop = top;
     window.scrollTo(0, y);
     if (opts.focus) { const el = root.querySelector(opts.focus); if (el) el.focus(); }
+    if (opts.flashBlock != null) { const el = root.querySelector(`.bblock[data-b="${opts.flashBlock}"]`); if (el) { el.classList.add("just-added"); el.scrollIntoView({ block: "nearest" }); } }
     if (opts.flashRow) { const el = root.querySelector(`.bex[data-b="${opts.flashRow[0]}"][data-e="${opts.flashRow[1]}"]`); if (el) { el.classList.add("just-added"); el.scrollIntoView({ block: "nearest" }); } }
   }
   PB.mount(app, {
@@ -363,6 +377,45 @@
     return html + `</section></div>`;
   }
 
+  // ─── library ──────────────────────────────────────────────────────────────────────────
+  // Browse the exercise library (by movement family) and the WOD library (Open, Girls, Heroes,
+  // tests, or by primary movement). Both drag into a program from the builder's side panel.
+  function libExercisesHTML() {
+    const lib = library(), ui = state.libPage, q = String(ui.query || "").toLowerCase().trim();
+    let html = "";
+    for (const c of lib.categories) {
+      if (ui.cat && ui.cat !== c) continue;
+      const items = lib.items.filter((i) => i.category === c && (!q || i.name.toLowerCase().includes(q)));
+      if (!items.length) continue;
+      html += `<section class="libp-group"><h3>${esc(c)} <span class="extra">${items.length}</span></h3><ul class="libp-ex">${items.map((i) => `<li><b>${esc(i.name)}</b><span class="extra">${esc(i.sets || 1)} × ${esc(i.target || "–")}${i.log ? ` · logs ${esc(i.log)}` : ""}</span>${i.search || i.video ? `<a class="extra" target="_blank" rel="noopener" href="${esc(i.video || "https://www.youtube.com/results?search_query=" + encodeURIComponent(i.search))}">Video ↗</a>` : ""}</li>`).join("")}</ul></section>`;
+    }
+    return html || `<div class="empty"><span>${state.librarySeed ? `No exercise called “${esc(ui.query)}”.` : "Loading the library…"}</span></div>`;
+  }
+  function libWodsHTML() {
+    const ui = state.libPage;
+    if (!state.wodSeed) return `<div class="empty"><span>Loading WODs…</span></div>`;
+    const secs = PB.wodSections(state.wodSeed, ui.query ? "" : ui.wodGroup, ui.query);
+    if (!secs.length) return `<div class="empty"><span>No WOD matches “${esc(ui.query)}”.</span></div>`;
+    return secs.map((sec) => `<section class="libp-group"><h3>${esc(sec.title)} <span class="extra">${sec.wods.length}</span></h3><div class="libp-wods">${sec.wods.map((w) => `<article class="wod-card">
+        <div class="wod-card-head"><b>${esc(w.name)}</b><span class="chip info">${esc(w.primary)}</span></div>
+        <div class="extra">${esc(PB.wodMeta(w))}${w.rounds ? ` · ${w.rounds} rounds` : ""} · scored by ${esc((W.TYPES[w.score] || {}).label || w.score)}</div>
+        <div class="pre wod-desc">${esc(w.description)}</div>
+        <div class="row"><button type="button" class="btn" data-act="wod-to-program" data-id="${esc(w.id)}">New program with this</button><button type="button" class="btn" data-act="wod-to-board" data-id="${esc(w.id)}">Start a leaderboard</button></div>
+      </article>`).join("")}</div></section>`).join("");
+  }
+  function renderLibrary(v) {
+    const ui = state.libPage, wod = v.tab === "wod";
+    const nEx = library().items.length, nW = state.wodSeed ? state.wodSeed.wods.length : 0;
+    const chips = wod
+      ? [["open", "CrossFit Open"], ["girls", "The Girls"], ["hero", "Heroes"], ["test", "Tests"], ["movement", "By movement"]].map(([g, l]) => `<button type="button" class="chip-btn${ui.wodGroup === g ? " on" : ""}" data-act="libp-group" data-g="${g}">${l}</button>`).join("")
+      : ["", ...library().categories].map((c) => `<button type="button" class="chip-btn${(ui.cat || "") === c ? " on" : ""}" data-act="libp-cat" data-c="${esc(c)}">${esc(c || "All")}</button>`).join("");
+    return `<section class="hero"><div class="eyebrow">Library</div><h2>${wod ? "WODs" : "Exercises"}</h2>
+        <div class="extra">${wod ? "Open workouts 2011–2025, benchmark Girls, Hero WODs and tests. Loads are Rx men/women in kg." : "Grouped by movement family. Exercises used in your programs join automatically."} In a program, drag any of these from the builder's side panel into the athlete's session.</div></section>
+      <div class="mode-tabs" role="tablist"><a role="tab" href="#library" aria-selected="${!wod}">Exercises <span class="extra">${nEx}</span></a><a role="tab" href="#library-wods" aria-selected="${wod}">WODs <span class="extra">${nW}</span></a></div>
+      <div class="libp-tools"><input type="search" id="libp-search" placeholder="${wod ? "Search WODs or movements, e.g. thruster" : "Search exercises"}" value="${esc(ui.query)}" aria-label="Search"><div class="lib-cats">${chips}</div></div>
+      <div id="libp-list">${wod ? libWodsHTML() : libExercisesHTML()}</div>`;
+  }
+
   function wodFormHTML(w) {
     w = w || {};
     const type = w.score_type || "time";
@@ -393,7 +446,7 @@
       }
       html += `</tbody></table></div>`;
     } else html += `<div class="empty"><strong>No WODs yet</strong><span>Create one below and its leaderboard shows on every athlete's log.</span></div>`;
-    return html + `<section class="card"><h3>New WOD</h3>${wodFormHTML(null)}</section>`;
+    return html + `<section class="card" id="new-wod"><h3>New WOD</h3>${state.wodDraft ? `<div class="extra">From the library. Check it, then create the board.</div>` : `<div class="extra">Or start from one in the <a href="#library-wods">WOD library</a>.</div>`}${wodFormHTML(state.wodDraft)}</section>`;
   }
   function statusChip(s) { return s === "open" ? `<span class="chip back">Open</span>` : s === "closed" ? `<span class="chip info">Closed</span>` : `<span class="chip hold">Draft</span>`; }
 
@@ -466,6 +519,7 @@
     else if (v.kind === "programs") html = renderPrograms();
     else if (v.kind === "program") html = renderProgram(v);
     else if (v.kind === "feedback") html = renderFeedback();
+    else if (v.kind === "library") html = renderLibrary(v);
     else if (v.kind === "boards") html = renderBoards();
     else if (v.kind === "board") html = renderBoard(v);
     else html = renderAthletes();
@@ -525,6 +579,7 @@
         if (f.id === "wod-add") {
           const { data, error } = await sb.from("wods").insert(Object.assign({ created_by_email: state.me }, row)).select().single();
           if (error) return failed(error);
+          state.wodDraft = null;
           await loadAll(); location.hash = "board-" + data.id; render();
         } else {
           state.editingWod = false;
@@ -559,6 +614,11 @@
 
   // Live check and preview while editing JSON.
   app.addEventListener("input", (ev) => {
+    if (ev.target.id === "libp-search") {
+      state.libPage.query = ev.target.value;
+      const l = $("#libp-list"); if (l) l.innerHTML = view().tab === "wod" ? libWodsHTML() : libExercisesHTML();
+      return;
+    }
     if (ev.target.id === "program-json" && state.edit) {
       setEditText(ev.target.value);
       refreshCheck();
@@ -622,6 +682,14 @@
       const n = state.notes.find((x) => x.id === id); if (!n) return;
       await run(sb.from("notes").update({ reviewed: !n.reviewed, reviewed_by_email: n.reviewed ? null : state.me }).eq("id", id));
     } else if (act === "reply") { state.reply = id || null; render(); const t = $(".reply-form textarea"); if (t) t.focus(); }
+    else if (act === "libp-cat") { state.libPage.cat = btn.dataset.c; render(); }
+    else if (act === "libp-group") { state.libPage.wodGroup = btn.dataset.g; state.libPage.query = ""; render(); }
+    else if (act === "wod-to-program") { state.pendingWod = id; state.edit = null; if (location.hash === "#program-new") render(); else location.hash = "program-new"; }
+    else if (act === "wod-to-board") {
+      const w = state.wodSeed && state.wodSeed.wods.find((x) => x.id === id); if (!w) return;
+      state.wodDraft = { name: w.name, score_type: w.score, time_cap_seconds: w.cap || null, status: "draft", description: w.description };
+      location.hash = "boards"; setTimeout(() => { const el = $("#new-wod"); if (el) el.scrollIntoView({ block: "start" }); }, 0);
+    }
     else if (act === "wod-status") { await run(sb.from("wods").update({ status: btn.dataset.s }).eq("id", id)); }
     else if (act === "edit-wod") { state.editingWod = !state.editingWod; render(); }
     else if (act === "cancel-wod") { state.editingWod = false; render(); }
@@ -640,6 +708,7 @@
   window.addEventListener("hashchange", () => {
     state.confirm = null; state.editingMember = null; state.reply = null; state.editingWod = false;
     if (view().kind !== "program") state.edit = null;
+    if (view().kind !== "boards") state.wodDraft = null;
     render(); window.scrollTo(0, 0);
   });
 
@@ -673,9 +742,10 @@
     state.role = row ? row.role : null; state.name = row ? row.display_name : null;
     if (state.role !== "trainer") { state.loaded = false; render(); return; }
     try { await loadAll(); } catch (e) { state.error = e.message; render(); return; }
-    Promise.all([loadFileSessions(), fetch("exercises.json", { cache: "no-cache" }).then((r) => r.json()).catch(() => null)]).then(([files, seed]) => {
-      Object.assign(state, { fileIds: files.map((s) => s.id), fileSessions: files, librarySeed: seed });
-      if (view().kind === "programs") softRender();
+    const getJSON = (u) => fetch(u, { cache: "no-cache" }).then((r) => r.json()).catch(() => null);
+    Promise.all([loadFileSessions(), getJSON("exercises.json"), getJSON("wods.json")]).then(([files, seed, wods]) => {
+      Object.assign(state, { fileIds: files.map((s) => s.id), fileSessions: files, librarySeed: seed, wodSeed: wods });
+      if (view().kind === "programs" || view().kind === "library") softRender();
       else if (view().kind === "program" && state.edit && state.edit.mode === "builder") renderBuilder();
     });
     if (channel) sb.removeChannel(channel);

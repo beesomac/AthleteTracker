@@ -258,3 +258,4 @@ a.signout{white-space:nowrap}
 li.step-row.tick-only{grid-template-columns:34px 1fr 44px}
 li.step-row.tick-only .step-main{cursor:default}
 .kg-box.unit-reps .kg-input,.kg-box.unit-secs .kg-input{padding-right:32px}
+.block-note{white-space:pre-line;font-size:14px;color:var(--muted);margin:-4px 0 10px;line-height:1.45}

@@ -414,7 +414,7 @@
       const circuit = active.length > 1;
       const roundsN = Math.max(0, ...active.map((ex) => ex.sets || 1));
       const lifts = liftHistory();
-      html += `<section class="block"><div class="block-head"><span class="letter">${esc(b.key)}</span><h3>${esc(b.name)}</h3>${roundsN ? `<span class="rounds">${roundsN} ${circuit ? "round" : "set"}${roundsN > 1 ? "s" : ""}</span>` : ""}</div>`;
+      html += `<section class="block"><div class="block-head"><span class="letter">${esc(b.key)}</span><h3>${esc(b.name)}</h3>${roundsN ? `<span class="rounds">${roundsN} ${circuit ? "round" : "set"}${roundsN > 1 ? "s" : ""}</span>` : ""}</div>${b.note ? `<div class="block-note">${esc(b.note)}</div>` : ""}`;
       let setsHtml = "";
       if (active.length && active.every(tickOnly)) {
         setsHtml += `<div class="how">Tap the circle when it's done.</div><div class="round-grid">`;
