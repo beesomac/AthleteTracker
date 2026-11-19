@@ -1,0 +1,25 @@
+{
+ "id": "2026-11-19",
+ "date": "2026-11-19",
+ "short": "Session 3",
+ "title": "Mobility",
+ "summaryLabel": "Today",
+ "summary": "Follow along with the YouTube mobility session from start to finish. Tick it off when it's done and add a note on how it felt, especially the ankle.",
+ "blocks": [
+  {
+   "key": "A",
+   "name": "Mobility",
+   "exercises": [
+    {
+     "id": "m1",
+     "name": "Complete YouTube follow along",
+     "sets": 1,
+     "target": "Full video",
+     "log": "tick",
+     "video": "https://youtu.be/NGsMZpOh2Bc",
+     "cue": "Play the video and follow along. Ease into any stretch that pinches the front of the ankle rather than forcing it."
+    }
+   ]
+  }
+ ]
+}
