@@ -62,6 +62,8 @@ After 004, add and rename people in the console (Athletes). Before 004, only the
 
 ### Data for other apps (iOS)
 
+The iPhone app in `ios/` uses these (see `ios/README.md` for how to open and run it in Xcode).
+
 Everything lives in Supabase, readable with the anon key plus a signed-in user, with row-level security doing the filtering:
 
 | Table / function | What it holds |

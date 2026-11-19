@@ -7,29 +7,33 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		43E80383DD48E80B4AAD1662 /* AthleteTrackerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AA80C3A7F5163B4F4B2F13A /* AthleteTrackerApp.swift */; };
-		A9B6A1BE906AD3984B980423 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F971336FF53436AF055E84 /* ContentView.swift */; };
-		BF6E067D18B5CD13E91401F4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CCB4AFE75BDAA2917049B4CF /* Assets.xcassets */; };
+		5B1A0C0E2D8F4A6B00A1B2C3 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 5B1A0C0D2D8F4A6B00A1B2C3 /* Supabase */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		6CE0A9F6B63AE1029C03563B /* AthleteTracker.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AthleteTracker.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		7AA80C3A7F5163B4F4B2F13A /* AthleteTrackerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteTrackerApp.swift; sourceTree = "<group>"; };
-		CCB4AFE75BDAA2917049B4CF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		E4F971336FF53436AF055E84 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		6CE0A9F6B63AE1029C03563B /* AthleteTracker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AthleteTracker.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
-/* Begin PBXGroup section */
+/* Begin PBXFileSystemSynchronizedRootGroup section */
 		0C881DECC6849A649B05DA09 /* AthleteTracker */ = {
-			isa = PBXGroup;
-			children = (
-				CCB4AFE75BDAA2917049B4CF /* Assets.xcassets */,
-				7AA80C3A7F5163B4F4B2F13A /* AthleteTrackerApp.swift */,
-				E4F971336FF53436AF055E84 /* ContentView.swift */,
-			);
+			isa = PBXFileSystemSynchronizedRootGroup;
 			path = AthleteTracker;
 			sourceTree = "<group>";
 		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		5B1A0C0F2D8F4A6B00A1B2C3 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5B1A0C0E2D8F4A6B00A1B2C3 /* Supabase in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
 		420BE0C1F6021B5569E4893D /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -54,14 +58,19 @@
 			buildConfigurationList = 2490EB16456D8990E566C33A /* Build configuration list for PBXNativeTarget "AthleteTracker" */;
 			buildPhases = (
 				AD1A1E2A6856F366FF74ACAA /* Sources */,
+				5B1A0C0F2D8F4A6B00A1B2C3 /* Frameworks */,
 				B167D3CFC19F1D07DA24B47F /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
+			fileSystemSynchronizedGroups = (
+				0C881DECC6849A649B05DA09 /* AthleteTracker */,
+			);
 			name = AthleteTracker;
 			packageProductDependencies = (
+				5B1A0C0D2D8F4A6B00A1B2C3 /* Supabase */,
 			);
 			productName = AthleteTracker;
 			productReference = 6CE0A9F6B63AE1029C03563B /* AthleteTracker.app */;
@@ -74,7 +83,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 1430;
+				LastUpgradeCheck = 1600;
 				TargetAttributes = {
 					C448F61F663CE78D8700D5DC = {
 						ProvisioningStyle = Automatic;
@@ -90,6 +99,9 @@
 			);
 			mainGroup = 8520B63B88EE5B42FFD12ECB;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				5B1A0C0C2D8F4A6B00A1B2C3 /* XCRemoteSwiftPackageReference "supabase-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 420BE0C1F6021B5569E4893D /* Products */;
 			projectDirPath = "";
@@ -105,7 +117,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				BF6E067D18B5CD13E91401F4 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -116,8 +127,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				43E80383DD48E80B4AAD1662 /* AthleteTrackerApp.swift in Sources */,
-				A9B6A1BE906AD3984B980423 /* ContentView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -257,7 +266,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = AthleteTracker;
+				INFOPLIST_KEY_CFBundleDisplayName = "Training Log";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
@@ -279,7 +288,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = AthleteTracker;
+				INFOPLIST_KEY_CFBundleDisplayName = "Training Log";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
@@ -315,6 +324,25 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		5B1A0C0C2D8F4A6B00A1B2C3 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.30.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		5B1A0C0D2D8F4A6B00A1B2C3 /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5B1A0C0C2D8F4A6B00A1B2C3 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 05CACF661E8EC07DA3F40375 /* Project object */;
 }
