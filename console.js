@@ -22,7 +22,9 @@
   function fmtDate(iso) { if (!iso) return ""; try { return new Date(String(iso).slice(0, 10) + "T12:00:00").toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }); } catch (e) { return iso; } }
   function fmtWhen(iso) { try { const d = new Date(iso); return d.toLocaleDateString(undefined, { day: "numeric", month: "short" }) + " " + d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }); } catch (e) { return ""; } }
   function today() { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
-  const athletes = () => state.members.filter((m) => m.role === "athlete");
+  // A trainer flagged also_athlete (006) trains too, so they count as an athlete everywhere here.
+  const isAthlete = (m) => m.role === "athlete" || !!m.also_athlete;
+  const athletes = () => state.members.filter(isAthlete);
   // The inbox is for what athletes wrote; trainers' own replies don't need reviewing here.
   const byTrainer = (n) => state.members.some((m) => m.role === "trainer" && m.email === String(n.author_email || "").toLowerCase());
   const needsReview = (n) => !n.reviewed && !byTrainer(n);
@@ -121,6 +123,7 @@
           <label>Name<input name="name" value="${esc(m.display_name || "")}" maxlength="80" required></label>
           <label>Role<select name="role"><option value="athlete" ${m.role === "athlete" ? "selected" : ""}>Athlete</option><option value="trainer" ${m.role === "trainer" ? "selected" : ""}>Trainer</option></select></label>
           <label class="check"><input type="checkbox" name="active" ${m.active ? "checked" : ""}> Can sign in</label>
+          ${"also_athlete" in m ? `<label class="check"><input type="checkbox" name="also_athlete" ${m.also_athlete ? "checked" : ""}> Trainer also trains (shows as an athlete)</label>` : ""}
           <div class="row"><button type="button" class="btn" data-act="cancel-member">Cancel</button><button class="btn primary">Save</button></div></form></td></tr>`;
         continue;
       }
@@ -130,9 +133,9 @@
       html += `<tr class="${m.active ? "" : "inactive"}">
         <td data-l="Name"><b>${esc(m.display_name || "")}</b>${m.email === state.me ? ` <span class="extra">(you)</span>` : ""}</td>
         <td data-l="Email" class="mono">${esc(m.email)}</td>
-        <td data-l="Role"><span class="chip ${m.role === "trainer" ? "info" : "back"}">${m.role}</span>${m.active ? "" : ` <span class="chip hold">inactive</span>`}</td>
-        <td data-l="Programs">${m.role === "athlete" ? progs : ""}</td>
-        <td data-l="Open notes">${m.role === "athlete" ? (open ? `<a href="#feedback" data-act="filter-athlete" data-email="${esc(m.email)}">${open}</a>` : "0") : ""}</td>
+        <td data-l="Role"><span class="chip ${m.role === "trainer" ? "info" : "back"}">${m.role}</span>${m.role === "trainer" && m.also_athlete ? ` <span class="chip back">athlete</span>` : ""}${m.active ? "" : ` <span class="chip hold">inactive</span>`}</td>
+        <td data-l="Programs">${isAthlete(m) ? progs : ""}</td>
+        <td data-l="Open notes">${isAthlete(m) ? (open ? `<a href="#feedback" data-act="filter-athlete" data-email="${esc(m.email)}">${open}</a>` : "0") : ""}</td>
         <td data-l="Last finished">${fin ? `${esc(programTitle(fin.session_id))} <span class="extra">${esc(fmtWhen(fin.finished_at))}</span>` : `<span class="extra">–</span>`}</td>
         <td class="actions"><button class="btn" data-act="edit-member" data-email="${esc(m.email)}">Edit</button></td></tr>`;
     }
@@ -221,6 +224,9 @@
         else ids.add(String(ex.id));
         if (ex && ex.sets != null && !(Number.isInteger(ex.sets) && ex.sets >= 1 && ex.sets <= 20)) errors.push(`${w2}: "sets" should be a whole number from 1 to 20.`);
         if (ex && ex.pct != null && !(ex.pct > 0 && ex.pct <= 1.2)) warnings.push(`${w2}: "pct" is a fraction, e.g. 0.75 for 75%.`);
+        if (ex && ex.video != null && !/^https:\/\//.test(String(ex.video))) errors.push(`${w2}: "video" should be a full https:// link.`);
+        if (ex && ex.log != null && !["kg", "reps", "secs", "tick"].includes(ex.log)) errors.push(`${w2}: "log" should be "kg" (weight), "reps" (bodyweight reps), "secs" (a timed hold) or "tick" (done/not done).`);
+        else if (ex && ex.log == null) warnings.push(`${w2}: no "log", so the athlete sees a ${/^\s*\d+(\s*[-–]\s*\d+)?\s*(s|sec|secs|seconds)\b/i.test(String(ex.target || "")) ? "seconds" : "kg"} box. Add "log": "kg", "reps", "secs" or "tick" to be sure.`);
       });
     });
     return { body, errors, warnings };
@@ -229,7 +235,7 @@
   function previewHTML(body) {
     if (!body || !Array.isArray(body.blocks)) return "";
     return `<div class="preview">${body.summary ? `<div class="status">${esc(body.summary)}</div>` : ""}${body.blocks.map((b) => `<div class="pv-block"><div class="block-head"><span class="letter">${esc(b.key || "")}</span><h3>${esc(b.name || "")}</h3>${b.rounds ? `<span class="rounds">${esc(b.rounds)}</span>` : ""}</div>
-      <ul>${(b.exercises || []).map((ex) => `<li><span>${esc(ex.name || "?")}${ex.status ? ` <span class="chip ${esc(ex.status)}">${esc(ex.status)}</span>` : ""}</span><span class="extra">${esc(ex.sets || 1)} × ${esc(ex.target || "")}${ex.pct ? ` · ${Math.round(ex.pct * 100)}%` : ""}</span></li>`).join("")}</ul></div>`).join("")}</div>`;
+      <ul>${(b.exercises || []).map((ex) => `<li><span>${esc(ex.name || "?")}${ex.status ? ` <span class="chip ${esc(ex.status)}">${esc(ex.status)}</span>` : ""}</span><span class="extra">${esc(ex.sets || 1)} × ${esc(ex.target || "")}${ex.pct ? ` · ${Math.round(ex.pct * 100)}%` : ""}${ex.log ? ` · logs ${esc({ kg: "kg", reps: "reps", secs: "seconds", tick: "tick" }[ex.log] || ex.log)}` : ""}</span></li>`).join("")}</ul></div>`).join("")}</div>`;
   }
 
   function startEdit(id) {
@@ -493,7 +499,9 @@
         const email = f.dataset.email;
         if (email === state.me && (val(f, "role") !== "trainer" || !checked(f, "active"))) { flash("You can't remove your own trainer access here."); return; }
         state.editingMember = null;
-        await run(sb.from("members").update({ display_name: val(f, "name"), role: val(f, "role"), active: checked(f, "active") }).eq("email", email));
+        const upd = { display_name: val(f, "name"), role: val(f, "role"), active: checked(f, "active") };
+        if (f.elements.also_athlete) upd.also_athlete = upd.role === "trainer" && checked(f, "also_athlete");
+        await run(sb.from("members").update(upd).eq("email", email));
       } else if (f.id === "program-form") {
         const e = state.edit; const chk = checkProgram(e.text);
         if (chk.errors.length) { flash("Fix the problems in the JSON first."); return; }

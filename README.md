@@ -38,7 +38,7 @@ Session fields:
 | `short`, `title` | Tab label (e.g. "Session 3") and the heading |
 | `summary` | The ankle check shown at the top |
 | `blocks[]` | `key` (A, B… or 1, 2…), `name`, optional `rounds` |
-| `blocks[].exercises[]` | `id`, `name`, `sets` (number of tick circles), `target` (e.g. "10 reps"), optional `status` (`new`, `back`, `swap`, `watch`, `hold`), `cue`, `extra` (RPE / previous loads), `search` (YouTube search words), `video` (a specific YouTube link, replaces the search), `pct` (e.g. `0.75` to suggest 75% of the lift's estimated 1RM), `pcts` (one % per set, e.g. `[0.7, 0.75, 0.8]`, so later sets scale up or down from the weight typed in), `suggestKg` (a fixed suggested weight) |
+| `blocks[].exercises[]` | `id`, `name`, `sets` (number of tick circles), `target` (e.g. "10 reps"), optional `status` (`new`, `back`, `swap`, `watch`, `hold`), `cue`, `extra` (RPE / previous loads), `search` (YouTube search words), `video` (a specific YouTube link, replaces the search; YouTube links also play inline), `log` (what each set asks for: `"kg"` a weight box, reps change on tap; `"reps"` a reps box for bodyweight work; `"secs"` a seconds box for holds; `"tick"` a plain done/not done item, e.g. a follow-along video. Without it, a target in seconds such as "30 s" gets a seconds box and anything else a kg box), `pct` (e.g. `0.75` to suggest 75% of the lift's estimated 1RM), `pcts` (one % per set, e.g. `[0.7, 0.75, 0.8]`, so later sets scale up or down from the weight typed in), `suggestKg` (a fixed suggested weight) |
 | `next[]` | Next progressions, listed at the bottom |
 | `planUrl`, `planLabel` | Link to the full plan, and its link text |
 | `summaryLabel` | Label for `summary` (default "Ankle check") |
@@ -58,9 +58,13 @@ Then run `supabase/002_skip_finish_notify.sql` the same way (fill in the ntfy to
 
 Then run `supabase/003_lift_maxes.sql`, and `supabase/004_trainer_console.sql` for the trainer console. 004 moves people into a `members` table: the notify admin email becomes the trainer and everyone else an athlete. It gives all existing ticks, notes, finishes and 1RMs to the existing athlete, so nothing is lost. Deploy the website first, then run it; both orders are safe for the existing athlete.
 
+To train as an athlete yourself on your trainer email, run `supabase/006_trainer_also_athlete.sql`, then tick **Trainer also trains** on your row in the console's Athletes tab. You then show up with the athletes, and can pick your own log on the athlete site.
+
 After 004, add and rename people in the console (Athletes). Before 004, only the emails in `allowed_emails` can see or change anything; to add someone, run `insert into allowed_emails values ('their@email.com');` in the SQL Editor.
 
 ### Data for other apps (iOS)
+
+The iPhone app in `ios/` uses these (see `ios/README.md` for how to open and run it in Xcode).
 
 Everything lives in Supabase, readable with the anon key plus a signed-in user, with row-level security doing the filtering:
 

@@ -1,0 +1,218 @@
+{
+ "id": "2026-11-17",
+ "date": "2026-11-17",
+ "short": "Session 2",
+ "title": "Acceleration & Strength",
+ "planUrl": "https://claude.ai/artifact/EZ7o2VbjrKyAuTWhFKBPWK",
+ "summary": "Session 1 went perfectly: 41/41 sets, nothing missed or cut short. Same session again with a small step up everywhere: pogos to 20, box jumps to 4, a bit more weight on the lifts. Broad jumps stay on hold, and there's a quick single-leg calf raise test at the end of accessories to see how close he is to bringing them back.",
+ "blocks": [
+  {
+   "key": "A",
+   "name": "Prep",
+   "rounds": "2 rounds",
+   "exercises": [
+    {
+     "id": "p1",
+     "name": "Adductor Rock Backs",
+     "sets": 2,
+     "target": "10 reps",
+     "search": "adductor rock back"
+    },
+    {
+     "id": "p2",
+     "name": "World's Greatest Stretch",
+     "sets": 2,
+     "target": "5 / side",
+     "cue": "Injured side as front leg: let the knee drift forward over the toes slowly. If the front of the ankle pinches, stop short of it.",
+     "search": "worlds greatest stretch"
+    },
+    {
+     "id": "p3",
+     "name": "Deadbug",
+     "sets": 2,
+     "target": "10 reps",
+     "status": "new",
+     "search": "dead bug exercise"
+    },
+    {
+     "id": "p4",
+     "name": "Band Pull Apart",
+     "sets": 2,
+     "target": "15 reps",
+     "status": "new",
+     "search": "band pull apart"
+    },
+    {
+     "id": "p5",
+     "name": "Calf Raises (double then single leg)",
+     "sets": 2,
+     "target": "10 + 10",
+     "cue": "Same primer as session 1, before pogos: 10 double-leg, then 10 single-leg on the injured side.",
+     "search": "single leg calf raise"
+    }
+   ]
+  },
+  {
+   "key": "B",
+   "name": "Acceleration",
+   "rounds": "3 rounds",
+   "exercises": [
+    {
+     "id": "a1",
+     "name": "Pogo Jumps",
+     "sets": 3,
+     "target": "20 reps",
+     "status": "back",
+     "cue": "Up from 3×15, which he did cleanly last time. Stiff ankles, quiet even landings. If the last 5 reps get flat-footed or lopsided, stop at 15.",
+     "search": "pogo jumps"
+    },
+    {
+     "id": "a2",
+     "name": "Falling Start Accels",
+     "sets": 3,
+     "target": "10 m",
+     "cue": "Pain-free last time, so full effort from the first rep after a build-up run. Lean, fall, drive.",
+     "search": "falling start acceleration sprint"
+    },
+    {
+     "id": "a3",
+     "name": "Box Jump (instead of Broad Jump)",
+     "sets": 3,
+     "target": "4 reps",
+     "status": "swap",
+     "cue": "Up from 3×3. Jump up, step down. Land soft and level on the box.",
+     "search": "box jump step down"
+    },
+    {
+     "id": "a4",
+     "name": "Broad Jump",
+     "sets": 3,
+     "target": "3 reps",
+     "status": "hold",
+     "cue": "Still held. Comes back as a broad jump with a 2-second stuck landing once the calf raise test (block E) reaches about 25.",
+     "search": "standing broad jump"
+    }
+   ]
+  },
+  {
+   "key": "C",
+   "name": "Primary Strength",
+   "rounds": "4 rounds",
+   "exercises": [
+    {
+     "id": "ps1",
+     "name": "BB Box Squat",
+     "sets": 4,
+     "target": "8 reps",
+     "cue": "Weight even across both feet.",
+     "suggestKg": 65,
+     "extra": "RPE 6, 6, 7, 7 · try 65 / 72.5 / 77.5 / 77.5 kg · last 60 / 70 / 75 / 75 kg × 8",
+     "search": "barbell box squat"
+    },
+    {
+     "id": "ps2",
+     "name": "Chin Ups",
+     "sets": 4,
+     "target": "7 reps",
+     "cue": "Up from 4×6. If the 4th set stalls at 6, that's fine.",
+     "extra": "RPE 7 · last 4 × 6",
+     "search": "chin up"
+    }
+   ]
+  },
+  {
+   "key": "D",
+   "name": "Secondary Strength",
+   "rounds": "3 rounds",
+   "exercises": [
+    {
+     "id": "ss1",
+     "name": "DB Bulgarian Split Squat",
+     "sets": 3,
+     "target": "8 / leg",
+     "cue": "Injured leg as the front leg: control the knee travel forward rather than dropping into the bottom.",
+     "suggestKg": 17.5,
+     "extra": "RPE 7 · last 3 × 8 × 15 kg",
+     "search": "dumbbell bulgarian split squat"
+    },
+    {
+     "id": "ss2",
+     "name": "DB Bench Press",
+     "sets": 3,
+     "target": "10 reps",
+     "suggestKg": 25,
+     "cue": "Go to 25 kg; if 10 isn't there, 8 is fine.",
+     "extra": "RPE 7 · last 3 × 10 × 22.5 kg (a PB, best was 8)",
+     "search": "dumbbell bench press"
+    }
+   ]
+  },
+  {
+   "key": "E",
+   "name": "Accessories",
+   "rounds": "3 rounds",
+   "exercises": [
+    {
+     "id": "ac1",
+     "name": "KB Romanian Deadlift",
+     "sets": 3,
+     "target": "10 reps",
+     "suggestKg": 24,
+     "extra": "RPE 7 · last 3 × 10 × 20 kg",
+     "search": "kettlebell romanian deadlift"
+    },
+    {
+     "id": "ac2",
+     "name": "DB Calf Raise (single leg)",
+     "sets": 3,
+     "target": "12 / side",
+     "status": "watch",
+     "cue": "Still the most useful exercise for the ankle. Same 15 kg, two more reps. Slow 3-second lower, full range.",
+     "suggestKg": 15,
+     "extra": "RPE 7 · last 3 × 10 × 15 kg · can use a machine",
+     "search": "single leg dumbbell calf raise"
+    },
+    {
+     "id": "ac3",
+     "name": "Calf Raise Test (injured side)",
+     "sets": 1,
+     "target": "max reps",
+     "status": "new",
+     "cue": "After the last calf set and a 2-minute rest: bodyweight only, single leg on the injured side, full range, steady tempo. Stop when height drops off. Then do the good side. Log both in a note. About 25 on the injured side, close to the good side, means broad jumps can start coming back.",
+     "search": "single leg calf raise test"
+    }
+   ]
+  },
+  {
+   "key": "F",
+   "name": "Resilience",
+   "rounds": "3 rounds",
+   "exercises": [
+    {
+     "id": "r1",
+     "name": "Bent Knee Copenhagen Plank",
+     "sets": 3,
+     "target": "35 s / side",
+     "cue": "Up from 30 s.",
+     "extra": "RPE 7 · last 3 × 30 s",
+     "search": "bent knee copenhagen plank"
+    },
+    {
+     "id": "r2",
+     "name": "Split Stance Cable Pallof Press",
+     "sets": 3,
+     "target": "10 reps",
+     "cue": "Do sets with each leg in front. One plate heavier than last time.",
+     "extra": "RPE 7 · last 3 × 10",
+     "search": "split stance pallof press"
+    }
+   ]
+  }
+ ],
+ "next": [
+  "Pogos: 3×20 → forward/back and side-to-side pogos → single-leg pogos.",
+  "Broad jumps: box jumps → broad jump with a 2-second stuck landing → full broad jumps.",
+  "Ready for broad jumps when pogos feel easy and even, sprints are pain-free, and the calf raise test gets to about 25 on the injured side.",
+  "Box squat: keep adding 2.5–5 kg a session while RPE stays at 7 or under."
+ ]
+}
