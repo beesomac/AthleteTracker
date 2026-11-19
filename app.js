@@ -32,8 +32,24 @@
     const src = ex.embed !== false && ytEmbed(ex.video);
     return src ? `<div class="video"><iframe src="${esc(src)}" title="${esc(ex.name)}" loading="lazy" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>` : "";
   }
-  // log: "tick" means a plain done/not done item (e.g. a follow-along video): no reps or weight.
-  const tickOnly = (ex) => ex.log === "tick";
+  // What each set asks for, from the exercise's "log" field:
+  //   "kg"   weight lifted (reps change on tap), "reps" bodyweight reps, "secs" a timed hold,
+  //   "tick" a plain done/not done item (e.g. a follow-along video).
+  // Without "log", a target in seconds ("30 s", "35 s / side") is a hold and anything else is weight.
+  const LOG_KINDS = ["kg", "reps", "secs", "tick"];
+  function logKind(ex) {
+    if (LOG_KINDS.includes(ex.log)) return ex.log;
+    return /^\s*\d+(\s*[-–]\s*\d+)?\s*(s|sec|secs|seconds)\b/i.test(ex.target || "") ? "secs" : "kg";
+  }
+  const tickOnly = (ex) => logKind(ex) === "tick";
+  const UNIT = { kg: "kg", reps: "reps", secs: "sec" };
+  // The number a set logged in its own unit (older holds were saved as reps).
+  function loggedVal(kind, info) { if (!info) return ""; return kind === "secs" ? info.secs || info.reps || "" : info[kind] || ""; }
+  function howText(active, circuit) {
+    const kinds = new Set(active.filter((ex) => !tickOnly(ex)).map(logKind));
+    const what = kinds.size === 1 ? { kg: "the weight (kg)", reps: "the reps you did", secs: "how many seconds you held" }[[...kinds][0]] : "the number (kg, reps or seconds, as labelled)";
+    return `Type ${what} in the box to tick off the ${circuit ? "exercise" : "set"}, or tap the circle.${kinds.has("kg") ? (circuit ? " Tap an exercise to change reps." : " Tap a set to change reps.") : ""}`;
+  }
   function nameOf(email) {
     if (!email) return "Someone";
     if (email === state.me) return "You";
@@ -318,8 +334,10 @@
     const st = steps[i], ex = st.ex;
     const t = state.ticks[tickId(s.id, ex.id)] || {};
     const info = setInfo(t.sets && t.sets[st.r]);
+    const kind = logKind(ex);
     const reps = info && info.reps ? info.reps : targetReps(ex);
-    const planned = plannedKg(s, ex, st.r);
+    const secs = loggedVal("secs", info) || targetReps(ex);
+    const planned = kind === "kg" ? plannedKg(s, ex, st.r) : "";
     const kg = info && info.kg ? info.kg : planned;
     const p = pctFor(ex, st.r);
     const nxt = steps[i + 1];
@@ -335,16 +353,20 @@
         ${ex.cue ? `<div class="cue">${esc(ex.cue)}</div>` : ""}
         ${ex.extra ? `<div class="extra">${esc(ex.extra)}</div>` : ""}
         ${videoHTML(ex)}
-        ${tickOnly(ex) ? "" : liftLine(ex, s.id)}
+        ${kind === "kg" ? liftLine(ex, s.id) : ""}
         <form class="guide-form" data-sid="${esc(s.id)}" data-eid="${esc(ex.id)}" data-set="${st.r}">
-          ${tickOnly(ex) ? "" : `<div class="stepper"><span class="stepper-label">Reps</span>
+          ${kind === "secs" ? `<div class="stepper"><span class="stepper-label">Seconds</span>
+            <button type="button" class="step-btn" data-act="bump" data-field="guide-secs" data-delta="-5" aria-label="5 seconds less">−</button>
+            <input id="guide-secs" type="number" inputmode="numeric" min="0" max="999" step="1" value="${esc(secs)}">
+            <button type="button" class="step-btn" data-act="bump" data-field="guide-secs" data-delta="5" aria-label="5 seconds more">+</button></div>` : ""}
+          ${kind === "kg" || kind === "reps" ? `<div class="stepper"><span class="stepper-label">Reps</span>
             <button type="button" class="step-btn" data-act="bump" data-field="guide-reps" data-delta="-1" aria-label="One less rep">−</button>
             <input id="guide-reps" type="number" inputmode="numeric" min="0" max="999" step="1" value="${esc(reps)}">
-            <button type="button" class="step-btn" data-act="bump" data-field="guide-reps" data-delta="1" aria-label="One more rep">+</button></div>
-          <div class="stepper"><span class="stepper-label">Weight kg</span>
+            <button type="button" class="step-btn" data-act="bump" data-field="guide-reps" data-delta="1" aria-label="One more rep">+</button></div>` : ""}
+          ${kind === "kg" ? `<div class="stepper"><span class="stepper-label">Weight kg</span>
             <button type="button" class="step-btn" data-act="bump" data-field="guide-kg" data-delta="-2.5" aria-label="2.5 kg less">−</button>
             <input id="guide-kg" type="number" inputmode="decimal" min="0" max="999" step="0.5" value="${esc(kg)}" placeholder="none">
-            <button type="button" class="step-btn" data-act="bump" data-field="guide-kg" data-delta="2.5" aria-label="2.5 kg more">+</button></div>`}
+            <button type="button" class="step-btn" data-act="bump" data-field="guide-kg" data-delta="2.5" aria-label="2.5 kg more">+</button></div>` : ""}
           <button type="submit" class="btn primary big">${info ? "Save · next" : "Done · next"}</button>
           ${info ? `<button type="button" class="btn" data-act="guide-untick">Untick this set</button>` : ""}
         </form>
@@ -415,7 +437,7 @@
         }
         setsHtml += `</div>`;
       } else if (active.length) {
-        setsHtml += circuit ? `<div class="how">Do one set of each exercise in order, then start the next round. Type the weight in the box to tick it off, or tap the circle. Tap an exercise to change reps.</div>` : `<div class="how">Type the weight in the box to tick off the set, or tap the circle. Tap a set to change reps.</div>`;
+        setsHtml += `<div class="how">${circuit ? "Do one set of each exercise in order, then start the next round. " : ""}${howText(active, circuit)}</div>`;
         setsHtml += `<div class="round-grid">`;
         for (let r = 1; r <= roundsN; r++) {
           let rows = "", doneInRound = 0, inRound = 0;
@@ -431,7 +453,8 @@
             const logKey = s.id + "|" + ex.id + "|" + r;
             const L = lifts[liftKey(ex.name)];
             const thisSet = L && L.sets.find((x) => x.session.id === s.id && x.ex.id === ex.id && x.round === r);
-            const planned = plannedKg(s, ex, r);
+            const kind = logKind(ex);
+            const planned = kind === "kg" ? plannedKg(s, ex, r) : "";
             const logged = info && (info.reps || info.kg) ? `${info.reps ? esc(info.reps) + " reps" : ""}${info.reps && info.kg ? " × " : ""}${info.kg ? esc(info.kg) + " kg" : ""}` : "";
             if (tickOnly(ex)) {
               rows += `<li class="step-row tick-only${on ? " on" : ""}${isNext ? " is-next" : ""}">
@@ -444,19 +467,19 @@
             }
             rows += `<li class="step-row${on ? " on" : ""}${isNext ? " is-next" : ""}">
               <span class="step-num">${esc(label)}</span>
-              <button class="step-main" data-act="open-log" data-key="${esc(logKey)}" aria-label="Log reps and weight for ${esc(ex.name)}, ${circuit ? "round" : "set"} ${r}">
+              <button class="step-main" data-act="open-log" data-key="${esc(logKey)}" aria-label="Log ${kind === "kg" ? "reps and weight" : kind === "secs" ? "seconds" : "reps"} for ${esc(ex.name)}, ${circuit ? "round" : "set"} ${r}">
                 <span class="step-name">${circuit ? esc(ex.name) : "Set " + r}${isNext ? ` <span class="up-next">Up next</span>` : ""}</span>
-                <span class="step-log">${info && info.reps ? esc(info.reps) + " reps" : `<span class="step-target-inline">${esc(ex.target || "")}</span>`}${pctFor(ex, r) ? ` · ${Math.round(pctFor(ex, r) * 100)}%` : ""}${thisSet && thisSet.pr ? ` <span class="pr">New best</span>` : ""}</span>
+                <span class="step-log">${kind === "kg" && info && info.reps ? esc(info.reps) + " reps" : `<span class="step-target-inline">${esc(ex.target || "")}</span>`}${pctFor(ex, r) ? ` · ${Math.round(pctFor(ex, r) * 100)}%` : ""}${thisSet && thisSet.pr ? ` <span class="pr">New best</span>` : ""}</span>
               </button>
-              <label class="kg-box${info && info.kg ? " filled" : ""}"><input id="kg-${esc(s.id)}-${esc(ex.id)}-${r}" class="kg-input" type="number" inputmode="decimal" min="0" max="999" step="0.5" value="${info && info.kg ? esc(info.kg) : ""}" placeholder="${esc(planned)}" data-sid="${esc(s.id)}" data-eid="${esc(ex.id)}" data-set="${r}" aria-label="Weight in kg for ${esc(ex.name)}, ${circuit ? "round" : "set"} ${r}"><span>kg</span></label>
+              <label class="kg-box unit-${kind}${loggedVal(kind, info) ? " filled" : ""}"><input id="kg-${esc(s.id)}-${esc(ex.id)}-${r}" class="kg-input" type="number" inputmode="${kind === "kg" ? "decimal" : "numeric"}" min="0" max="999" step="${kind === "kg" ? "0.5" : "1"}" value="${esc(loggedVal(kind, info))}" placeholder="${esc(kind === "kg" ? planned : targetReps(ex))}" data-field="${kind}" data-sid="${esc(s.id)}" data-eid="${esc(ex.id)}" data-set="${r}" aria-label="${kind === "kg" ? "Weight in kg" : kind === "secs" ? "Seconds held" : "Reps done"} for ${esc(ex.name)}, ${circuit ? "round" : "set"} ${r}"><span>${UNIT[kind]}</span></label>
               <button class="step-check" data-act="tick" data-sid="${esc(s.id)}" data-eid="${esc(ex.id)}" data-set="${r}" data-planned="${esc(planned)}" aria-pressed="${on}" aria-label="Mark ${esc(ex.name)} ${circuit ? "round" : "set"} ${r} done">${on ? "✓" : ""}</button>
             </li>`;
             if (state.openLog === logKey) {
               const reps = info && info.reps ? info.reps : targetReps(ex);
               const kg = info && info.kg ? info.kg : lastKg(ex);
               rows += `<li class="log-row"><form class="log-form" data-sid="${esc(s.id)}" data-eid="${esc(ex.id)}" data-set="${r}">
-                <label>Reps<input id="log-reps" type="number" inputmode="numeric" min="0" max="999" step="1" value="${esc(reps)}"></label>
-                <label>Weight (kg)<input id="log-kg" type="number" inputmode="decimal" min="0" max="999" step="0.5" value="${esc(kg)}" placeholder="bodyweight"></label>
+                ${kind === "secs" ? `<label>Seconds<input id="log-secs" type="number" inputmode="numeric" min="0" max="999" step="1" value="${esc(loggedVal("secs", info) || targetReps(ex))}"></label>` : `<label>Reps<input id="log-reps" type="number" inputmode="numeric" min="0" max="999" step="1" value="${esc(reps)}"></label>`}
+                ${kind === "kg" ? `<label>Weight (kg)<input id="log-kg" type="number" inputmode="decimal" min="0" max="999" step="0.5" value="${esc(kg)}" placeholder="bodyweight"></label>` : ""}
                 <div class="row">${on ? `<button type="button" class="btn" data-act="clear-log" data-sid="${esc(s.id)}" data-eid="${esc(ex.id)}" data-set="${r}">Untick</button>` : ""}<button type="button" class="btn" data-act="cancel-log">Cancel</button><button type="submit" class="btn primary">Save${on ? "" : " & tick"}</button></div>
               </form></li>`;
             }
@@ -484,7 +507,7 @@
           ${ex.cue ? `<div class="cue">${esc(ex.cue)}</div>` : ""}
           ${ex.extra ? `<div class="extra">${esc(ex.extra)}</div>` : ""}
           ${hold ? "" : videoHTML(ex)}
-          ${hold || tickOnly(ex) ? "" : liftLine(ex, s.id)}
+          ${hold || logKind(ex) !== "kg" ? "" : liftLine(ex, s.id)}
           <div class="ex-row">
             ${hold ? `<span class="who-ticked">Not this session</span>` : skipped ? `<span class="who-ticked">Skipped by ${esc(nameOf(t.by))} · ${esc(fmtWhen(t.at))}</span>` : tickOnly(ex) && n === 1 ? `<span class="who-ticked">${doneN ? "Done ✓" : "Not done yet"}</span>` : `<span class="who-ticked">${doneN}/${n} ${circuit ? "rounds" : "sets"} done</span>`}
             <div class="tools">
@@ -650,16 +673,17 @@
     const el = ev.target;
     if (!el.classList || !el.classList.contains("kg-input")) return;
     const { sid, eid } = el.dataset; const set = +el.dataset.set;
-    const kg = parseFloat(el.value);
+    const field = UNIT[el.dataset.field] ? el.dataset.field : "kg";
+    const val = field === "kg" ? parseFloat(el.value) : parseInt(el.value, 10);
     const prev = state.ticks[tickId(sid, eid)] || {};
     const sets = Object.assign({}, prev.sets || {});
     const old = setInfo(sets[set]) || {};
-    if (kg > 0) {
+    if (val > 0) {
       const ex = findEx(sid, eid);
-      sets[set] = Object.assign({}, old, { at: old.at || new Date().toISOString(), kg });
-      if (!sets[set].reps && ex && targetReps(ex)) sets[set].reps = targetReps(ex);
+      sets[set] = Object.assign({}, old, { at: old.at || new Date().toISOString(), [field]: val });
+      if (field === "kg" && !sets[set].reps && ex && targetReps(ex)) sets[set].reps = targetReps(ex);
     } else if (sets[set]) {
-      const copy = Object.assign({}, old); delete copy.kg; sets[set] = copy;
+      const copy = Object.assign({}, old); delete copy[field]; sets[set] = copy;
     } else return;
     await persistTick(sid, eid, { sets });
   });
@@ -684,12 +708,14 @@
       ev.preventDefault();
       const f = ev.target; const { sid, eid } = f.dataset; const set = +f.dataset.set;
       const reps = $("#guide-reps") ? parseInt($("#guide-reps").value, 10) : 0; const kg = $("#guide-kg") ? parseFloat($("#guide-kg").value) : 0;
+      const secs = $("#guide-secs") ? parseInt($("#guide-secs").value, 10) : 0;
       const prev = state.ticks[tickId(sid, eid)] || {};
       const old = setInfo((prev.sets || {})[set]);
       const sets = Object.assign({}, prev.sets || {});
       sets[set] = { at: (old && old.at) || new Date().toISOString() };
       if (reps > 0) sets[set].reps = reps;
       if (kg > 0) sets[set].kg = kg;
+      if (secs > 0) sets[set].secs = secs;
       // move on first so the next screen appears straight away
       const s = state.sessions.find((x) => x.id === sid); const steps = guideSteps(s);
       const i = steps.findIndex((x) => x.key === state.guide.key);
@@ -724,14 +750,17 @@
     if (ev.target.classList.contains("log-form")) {
       ev.preventDefault();
       const f = ev.target; const { sid, eid } = f.dataset; const set = +f.dataset.set;
-      const reps = parseInt($("#log-reps").value, 10);
-      const kg = parseFloat($("#log-kg").value);
+      const num = (id, fn) => { const el = $(id); return el ? fn(el.value) : 0; };
+      const reps = num("#log-reps", (v) => parseInt(v, 10));
+      const kg = num("#log-kg", parseFloat);
+      const secs = num("#log-secs", (v) => parseInt(v, 10));
       const prev = state.ticks[tickId(sid, eid)] || {};
       const old = setInfo((prev.sets || {})[set]);
       const sets = Object.assign({}, prev.sets || {});
       sets[set] = { at: (old && old.at) || new Date().toISOString() };
       if (reps > 0) sets[set].reps = reps;
       if (kg > 0) sets[set].kg = kg;
+      if (secs > 0) sets[set].secs = secs;
       state.openLog = null;
       const id = tickId(sid, eid);
       const next = Object.assign({ session: sid, ex: eid, sets: {}, skipped: false, skipReason: "" }, prev, { sets, by: state.me, at: new Date().toISOString() });
@@ -774,8 +803,9 @@
         sets[set] = { at: new Date().toISOString() };
         const ex = findEx(sid, eid);
         const planned = parseFloat(btn.dataset.planned);
-        if (planned > 0) sets[set].kg = planned;
-        if (ex && targetReps(ex)) sets[set].reps = targetReps(ex);
+        const kind = ex ? logKind(ex) : "kg";
+        if (kind === "kg" && planned > 0) sets[set].kg = planned;
+        if (ex && targetReps(ex) && kind !== "tick") sets[set][kind === "secs" ? "secs" : "reps"] = targetReps(ex);
       }
       await saveTick(sid, eid, { sets });
     } else if (act === "open-max") {
@@ -789,7 +819,7 @@
       try { await store.deleteMax(k); } catch (e) { state.maxes[k] = keep; render(); writeFailed(e); }
     } else if (act === "open-log") {
       state.openLog = state.openLog === btn.dataset.key ? null : btn.dataset.key; render();
-      const el = document.getElementById("log-kg"); if (el && !el.value) el.focus();
+      const el = document.getElementById("log-kg") || document.getElementById("log-reps") || document.getElementById("log-secs"); if (el && !el.value) el.focus();
     } else if (act === "cancel-log") {
       state.openLog = null; render();
     } else if (act === "clear-log") {
