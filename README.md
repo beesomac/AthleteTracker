@@ -21,6 +21,10 @@ On the athlete site a trainer gets an athlete picker in the header to see and ti
 
 Use **Programs → New program** in the console. Once any program is published for an athlete, the athlete site shows those instead of the files.
 
+The program editor opens in **Builder**: the exercise library sits on the left, and each exercise is a block you drag into a program block (Prep, Speed & Power, Primary Strength and so on), or add with **+** to the highlighted block. Drag exercises to reorder them or move them between blocks, and edit sets, target, status and cue in place. Each library exercise shows the last time the athlete did it (from published programs and the `sessions/` files). The library starts from `exercises.json`, and any exercise used in a saved program joins it automatically, so a new one only needs adding once with **+ New exercise**. Empty blocks are left out when you save. The **JSON** tab still shows and edits the same session JSON.
+
+The **Library** tab lists every exercise grouped by movement family (Clean, Snatch, Jerk & Overhead, Squat & Lunge, Deadlift & Hinge, Gymnastics, Kettlebell & Dumbbell, Cardio and so on) and a WOD library: CrossFit Open workouts 2011–2025, the benchmark Girls, Hero WODs and tests, also grouped by primary movement. A WOD can start a new program or a leaderboard from there. In the builder, the side panel switches between **Exercises** and **WODs**; drag a WOD above or below any block (or press **+**) and it becomes its own block, with each movement as an exercise and the full workout as the block's note, which athletes see on the site and in the iOS app. Both libraries are plain files (`exercises.json`, `wods.json`), so no database change is needed; add to them there.
+
 The `sessions/` files still work for the original athlete until programs are published for them (the console offers a one-click import of the files, keeping their ids so ticks and notes still line up). To add one the old way:
 
 1. Add a file to `sessions/` named by date, e.g. `sessions/2026-11-26.json`. Copy an existing session as a template.
@@ -35,7 +39,7 @@ Session fields:
 | `id`, `date` | The date, `YYYY-MM-DD` |
 | `short`, `title` | Tab label (e.g. "Session 3") and the heading |
 | `summary` | The ankle check shown at the top |
-| `blocks[]` | `key` (A, B… or 1, 2…), `name`, optional `rounds` |
+| `blocks[]` | `key` (A, B… or 1, 2…), `name`, optional `rounds`, `note` (text shown above the block, e.g. a WOD's full write-up), `wod` (the id of the library WOD it came from) |
 | `blocks[].exercises[]` | `id`, `name`, `sets` (number of tick circles), `target` (e.g. "10 reps"), optional `status` (`new`, `back`, `swap`, `watch`, `hold`), `cue`, `extra` (RPE / previous loads), `search` (YouTube search words), `video` (a specific YouTube link, replaces the search; YouTube links also play inline), `log` (what each set asks for: `"kg"` a weight box, reps change on tap; `"reps"` a reps box for bodyweight work; `"secs"` a seconds box for holds; `"tick"` a plain done/not done item, e.g. a follow-along video. Without it, a target in seconds such as "30 s" gets a seconds box and anything else a kg box), `pct` (e.g. `0.75` to suggest 75% of the lift's estimated 1RM), `pcts` (one % per set, e.g. `[0.7, 0.75, 0.8]`, so later sets scale up or down from the weight typed in), `suggestKg` (a fixed suggested weight) |
 | `next[]` | Next progressions, listed at the bottom |
 | `planUrl`, `planLabel` | Link to the full plan, and its link text |
