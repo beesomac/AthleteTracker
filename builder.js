@@ -328,7 +328,9 @@
         const w = ((ctx.lib().wods || {}).wods || []).find((x) => x.id === drag.id);
         drag = null; clearMarks(); if (!w) return;
         const body = ctx.body(); ctx.ui.target = wodBlock(body, w, t.at);
-        return ctx.change(true, { flashBlock: ctx.ui.target });
+        ctx.change(true, { flashBlock: ctx.ui.target });
+        if (ctx.wodAdded) ctx.wodAdded(ctx.ui.target);
+        return;
       }
       const list = ev.target.closest && ev.target.closest(".builder .drop"); if (!list) return;
       ev.preventDefault();
@@ -403,7 +405,9 @@
         const w = ((ctx.lib().wods || {}).wods || []).find((x) => x.id === btn.dataset.wod); if (!w) return;
         const t = targetIndex(body, ui);
         ui.target = wodBlock(body, w, t + 1);
-        return ctx.change(true, { flashBlock: ui.target });
+        ctx.change(true, { flashBlock: ui.target });
+        if (ctx.wodAdded) ctx.wodAdded(ui.target);
+        return;
       }
       if (act === "add-note") { body.blocks[bi].note = ""; return ctx.change(true, { focus: `.bblock[data-b="${bi}"] .bnote` }); }
       if (act === "add-lib") {

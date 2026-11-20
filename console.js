@@ -285,7 +285,7 @@
       body.short = "Session " + (state.programs.filter((x) => !who || x.athlete_email === who || !x.athlete_email).length + 1);
       // "New program with this WOD" from the library: the WOD goes in as block A's neighbour, after Prep.
       const w = state.pendingWod && state.wodSeed && state.wodSeed.wods.find((x) => x.id === state.pendingWod);
-      if (w) PB.wodBlock(body, w, 1);
+      if (w) state.askAfterRender = PB.wodBlock(body, w, 1);
     }
     state.pendingWod = null;
     state.edit = {
@@ -349,6 +349,8 @@
     return parts.join(" · ");
   };
   PB.mount(app, {
+    // A WOD dropped into the program: ask about its leaderboard straight away.
+    wodAdded: (bi) => { if (state.edit) openBoardAsk([bi], state.edit.athlete || null, { onSave: false }); },
     body: () => state.edit.body,
     lib: () => library(),
     ui: state.builder,
@@ -361,9 +363,10 @@
   });
 
   // ─── "Add to leaderboard?" ─────────────────────────────────────────────────────────────
-  function openBoardAsk(blockIdx, athleteEmail) {
+  function openBoardAsk(blockIdx, athleteEmail, opts = {}) {
     const body = state.edit.body;
     state.boardAsk = {
+      onSave: opts.onSave !== false,
       athletes: programAthletes(athleteEmail),
       items: blockIdx.filter((i) => i >= 0).map((bi) => {
         const b = body.blocks[bi], boards = boardsFor(b.wod, b.name).filter((w) => w.status !== "closed");
@@ -391,7 +394,7 @@
       <h3 id="ask-title">Add to leaderboard?</h3>
       <div class="extra">${esc(who)} ${a.athletes.length === 1 ? "goes" : "go"} on the board. Everyone on a board gets a notification when someone adds a score.${boardsReady() ? "" : " <b>Run supabase/007_wod_boards.sql to turn on board members and notifications;</b> until then the board is just linked."}</div>
       ${items}
-      <div class="row"><button type="button" class="btn" data-act="ask-cancel">Back to editing</button><button type="button" class="btn primary" data-act="ask-confirm">Save program</button></div>
+      <div class="row"><button type="button" class="btn" data-act="ask-cancel">${a.onSave ? "Back to editing" : "Decide when saving"}</button><button type="button" class="btn primary" data-act="ask-confirm">${a.onSave ? "Save program" : "OK"}</button></div>
     </div></div>`;
   }
   async function confirmBoardAsk() {
@@ -413,8 +416,10 @@
       }
     }
     e.text = JSON.stringify(e.body, null, 1);
+    const thenSave = a.onSave;
     state.boardAsk = null; render();
-    const f = $("#program-form"); if (f) f.requestSubmit();
+    if (thenSave) { const f = $("#program-form"); if (f) f.requestSubmit(); }
+    else { const b = e.body.blocks.find((x, i) => a.items.some((it) => it.bi === i)); flash(b && b.board ? `${b.name}: leaderboard set.` : "No leaderboard for this WOD.", "ok"); }
   }
   // Published with a WOD an athlete has done before: tell them, with how they did. Once per
   // athlete, program and WOD (a unique index in 007), however often the program is saved.
@@ -638,7 +643,11 @@
     else if (state.role !== "trainer") html = `<div class="empty"><strong>Not on the list</strong><span>${esc(state.me)} isn't set up as a trainer. <button class="signout" data-act="signout">Sign out</button></span></div>`;
     else if (!state.loaded) html = `<div class="hero"><div class="eyebrow">Loading</div><h2>Opening the console…</h2></div><div class="skeleton"></div>`;
     else if (v.kind === "programs") html = renderPrograms();
-    else if (v.kind === "program") html = renderProgram(v) + boardAskHTML();
+    else if (v.kind === "program") {
+      html = renderProgram(v);
+      if (state.askAfterRender != null && state.edit) { const bi = state.askAfterRender; state.askAfterRender = null; openBoardAsk([bi], state.edit.athlete || null, { onSave: false }); return; }
+      html += boardAskHTML();
+    }
     else if (v.kind === "feedback") html = renderFeedback();
     else if (v.kind === "library") html = renderLibrary(v);
     else if (v.kind === "boards") html = renderBoards();
@@ -685,6 +694,12 @@
         // A WOD that hasn't been asked about yet: "Add to leaderboard?" first, then save.
         const ask = chk.body.blocks.map((b, bi) => (isWodBlock(b) && !("board" in b) ? bi : -1)).filter((bi) => bi >= 0);
         if (ask.length) { setEditText(e.text); openBoardAsk(ask, row.athlete_email); return; }
+        // Athlete may have changed since the board was picked: make sure they're on it.
+        if (boardsReady()) {
+          const ups = [];
+          for (const b of body.blocks) if (b && b.board) for (const em of programAthletes(row.athlete_email)) ups.push({ wod_id: b.board, athlete_email: em, added_by_email: state.me });
+          if (ups.length) { const r = await sb.from("wod_board_members").upsert(ups, { onConflict: "wod_id,athlete_email", ignoreDuplicates: true }); if (r.error) console.warn(r.error); }
+        }
         const pid = e.id || newProgramId(row.date);
         const q = e.id ? sb.from("programs").update(row).eq("id", e.id) : sb.from("programs").insert(Object.assign({ id: pid }, row));
         if (await run(q, "Program saved.")) {
