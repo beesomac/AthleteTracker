@@ -14,8 +14,8 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-const KEY_ID = Deno.env.get("APNS_KEY_ID") ?? "";
-const TEAM_ID = Deno.env.get("APNS_TEAM_ID") ?? "";
+const KEY_ID = (Deno.env.get("APNS_KEY_ID") ?? "").replace(/[^A-Za-z0-9]/g, "");
+const TEAM_ID = (Deno.env.get("APNS_TEAM_ID") ?? "").replace(/[^A-Za-z0-9]/g, "");
 const PRIVATE_KEY = Deno.env.get("APNS_PRIVATE_KEY") ?? "";
 const BUNDLE_ID = Deno.env.get("APNS_BUNDLE_ID") ?? "com.blackstumpsoftware.TrainingLog";
 
@@ -156,6 +156,10 @@ Deno.serve(async (req) => {
       await db.from("device_tokens").delete().eq("token", t.token);
     }
     results.push({ token: t.token.slice(0, 8) + "…", ...r });
+  }
+  // Key ID and Team ID aren't secret; showing them makes InvalidProviderToken easy to check.
+  if (results.some((r) => r.reason === "InvalidProviderToken")) {
+    results.push({ token: "check", status: 0, reason: `Key ID ${KEY_ID}, Team ID ${TEAM_ID}, topic ${BUNDLE_ID}` });
   }
   console.log(JSON.stringify({ notification: n.id, results }));
   return json({ sent: results.filter((r) => r.status === 200).length, results });
