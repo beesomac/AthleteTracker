@@ -60,7 +60,15 @@ function p8Bytes(raw: string): Uint8Array {
 async function apnsJwt(): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   if (cached && now - cached.at < 40 * 60) return cached.jwt;
-  const key = await crypto.subtle.importKey("pkcs8", p8Bytes(PRIVATE_KEY), { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+  const der = p8Bytes(PRIVATE_KEY);
+  let key: CryptoKey;
+  try {
+    key = await crypto.subtle.importKey("pkcs8", der, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+  } catch {
+    // Only shapes, never key material: an APNs .p8 is 150 bytes and its first bytes are a fixed header.
+    const head = Array.from(der.slice(0, 6), (b) => b.toString(16).padStart(2, "0")).join("");
+    throw new Error(`APNS_PRIVATE_KEY isn't an APNs .p8 key: ${der.length} bytes (expected 150), starts ${head} (expected 308193020100), secret is ${PRIVATE_KEY.length} characters long`);
+  }
   const input = b64url(JSON.stringify({ alg: "ES256", kid: KEY_ID })) + "." + b64url(JSON.stringify({ iss: TEAM_ID, iat: now }));
   const sig = new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, new TextEncoder().encode(input)));
   cached = { jwt: input + "." + b64url(sig), at: now };
