@@ -52,7 +52,7 @@ struct WodTimerView: View {
         .statusBarHidden(phase == .running || phase == .paused)
         .persistentSystemOverlays(.hidden)
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true; fillSetupFields() }
-        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false; OrientationLock.landscape(false) }
         .sensoryFeedback(.impact(weight: .heavy), trigger: splits.count)
         .task(id: phase) {
             // Beeps and the automatic stop; the clock itself redraws in a TimelineView.
@@ -122,6 +122,7 @@ struct WodTimerView: View {
         pausedTotal = 0
         pausedAt = nil
         phase = .running
+        OrientationLock.landscape(true)
     }
 
     private func togglePause() {
@@ -144,6 +145,7 @@ struct WodTimerView: View {
         // Finishing by hand ends the last round (or movement) too, unless you just split.
         if !hitLimit && x > 0.5 && (splits.last.map { x - $0 > 3 } ?? true) { splits.append(elapsed) }
         phase = .done
+        OrientationLock.landscape(false)
         AudioServicesPlaySystemSound(1052)
     }
 
@@ -242,52 +244,90 @@ struct WodTimerView: View {
     // MARK: Running
 
     private var running: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(plan.title).font(.headline).lineLimit(1)
-                Spacer()
-                Button { finish(hitLimit: false) } label: {
-                    Image(systemName: "xmark").font(.headline).frame(width: 36, height: 36)
-                }
-                .buttonStyle(.bordered).clipShape(Circle())
-                .accessibilityLabel("Stop timer")
-            }
-            .padding(.horizontal, 20).padding(.top, 8)
-
+        GeometryReader { (geo: GeometryProxy) in
             TimelineView(.animation(minimumInterval: 0.1, paused: phase != .running)) { ctx in
-                face(t(ctx.date))
+                runningLayout(x: t(ctx.date), size: geo.size)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            HStack(spacing: 10) {
-                Button(phase == .paused ? "Resume" : "Pause") { togglePause() }
-                    .buttonStyle(TimerButtonStyle())
-                Button("Split") { split() }
-                    .buttonStyle(TimerButtonStyle())
-                Button("Finish") { finish(hitLimit: false) }
-                    .buttonStyle(TimerButtonStyle(prominent: true))
-            }
-            .padding(.horizontal, 20).padding(.bottom, 12)
         }
+        .padding(.horizontal, 16).padding(.vertical, 8)
         .background(Color.orange.opacity(flash ? 0.35 : 0).ignoresSafeArea())
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { split() }
         .accessibilityAction(named: "Record split") { split() }
     }
 
+    /// Sideways: the clock fills the left, round and buttons on the right. Upright: stacked.
     @ViewBuilder
-    private func face(_ x: Double) -> some View {
-        VStack(spacing: 8) {
-            let texts = clockTexts(x)
-            Text(texts.label.uppercased()).font(.subheadline.weight(.semibold)).tracking(2)
-                .foregroundStyle(isRest ? .green : .secondary)
+    private func runningLayout(x: Double, size: CGSize) -> some View {
+        if size.width > size.height {
+            HStack(spacing: 16) {
+                clockFace(x: x, digitHeight: size.height * 0.62)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                sidePanel(x: x)
+                    .frame(width: max(200, size.width * 0.27))
+            }
+        } else {
+            VStack(spacing: 12) {
+                topBar
+                clockFace(x: x, digitHeight: size.width * 0.42)
+                    .frame(maxHeight: .infinity)
+                if x >= 0 { roundView(x) }
+                Text(lastSplitText(x)).font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
+                buttons(vertical: false)
+            }
+        }
+    }
+
+    private var topBar: some View {
+        HStack {
+            Text(plan.title).font(.headline).lineLimit(1)
+            Spacer()
+            Button { finish(hitLimit: false) } label: {
+                Image(systemName: "xmark").font(.headline).frame(width: 36, height: 36)
+            }
+            .buttonStyle(.bordered).clipShape(Circle())
+            .accessibilityLabel("Stop timer")
+        }
+    }
+
+    /// Big LED-style digits, like a gym clock.
+    private func clockFace(x: Double, digitHeight: CGFloat) -> some View {
+        let texts = clockTexts(x)
+        let ledColor: Color = isRest ? Color(red: 0.3, green: 0.95, blue: 0.5) : Color(red: 1.0, green: 0.23, blue: 0.16)
+        return VStack(spacing: 4) {
+            Text(texts.label.uppercased())
+                .font(.headline.weight(.semibold)).tracking(3)
+                .foregroundStyle(isRest ? Color.green : Color.secondary)
             Text(texts.big)
-                .font(.system(size: 160, weight: .bold, design: .rounded).monospacedDigit())
-                .minimumScaleFactor(0.3).lineLimit(1)
-                .padding(.horizontal, 12)
+                .font(.custom("DBLCDTempBlack", size: digitHeight))
+                .monospacedDigit()
+                .foregroundStyle(ledColor)
+                .shadow(color: ledColor.opacity(0.55), radius: 12)
+                .minimumScaleFactor(0.2)
+                .lineLimit(1)
             Text(texts.sub).font(.title3.monospacedDigit()).foregroundStyle(.secondary)
-            if x >= 0 { roundView(x).padding(.top, 14) }
-            Text(lastSplitText(x)).font(.subheadline.monospacedDigit()).foregroundStyle(.secondary).padding(.top, 14)
+        }
+    }
+
+    private func sidePanel(x: Double) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            topBar
+            if x >= 0 { roundView(x).frame(maxWidth: .infinity) }
+            Spacer(minLength: 0)
+            Text(lastSplitText(x)).font(.footnote.monospacedDigit()).foregroundStyle(.secondary)
+            buttons(vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private func buttons(vertical: Bool) -> some View {
+        let pause = Button(phase == .paused ? "Resume" : "Pause") { togglePause() }.buttonStyle(TimerButtonStyle())
+        let splitButton = Button("Split") { split() }.buttonStyle(TimerButtonStyle())
+        let finishButton = Button("Finish") { finish(hitLimit: false) }.buttonStyle(TimerButtonStyle(prominent: true))
+        if vertical {
+            VStack(spacing: 8) { HStack(spacing: 8) { pause; splitButton }; finishButton }
+        } else {
+            HStack(spacing: 10) { pause; splitButton; finishButton }
         }
     }
 

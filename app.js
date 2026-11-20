@@ -616,7 +616,9 @@
     const canLog = board && board.status === "open" && mine;
     const sid = (currentView() || {}).id || "";
     const startBtn = window.WodTimer ? `<button class="btn primary" data-act="start-wod" data-sid="${esc(sid)}" data-bkey="${esc(b.key)}" data-wod="${esc(canLog ? board.id : "")}">Start WOD</button>` : "";
-    return `<div class="wod-panel"><div class="wod-hist">${hist}</div>${board ? `<div class="wod-board-row"><span class="extra">Leaderboard: ${esc(board.name)}${board.status === "closed" ? " (closed)" : ""}</span><span class="row">${startBtn}${canLog ? `<button class="btn" data-act="score-from-session" data-wod="${esc(board.id)}" data-sid="${esc(sid)}" data-bkey="${esc(b.key)}">Log score</button>` : `<a class="btn" href="#boards">See board</a>`}</span></div>` : startBtn ? `<div class="wod-board-row"><span class="extra">Timer only: there's no leaderboard for this WOD.</span>${startBtn}</div>` : ""}</div>`;
+    const lib = WT && b.wod ? WT.find(b.wod) : null;
+    const roundsTable = lib && lib.round_sets && lib.round_sets.length ? `<ol class="wod-plan">${lib.round_sets.map((r, i) => `<li><span>${lib.round_repeat ? "Each round" : "Round " + (i + 1)}</span><span>${r.map((x) => `<b>${esc(x.target)}</b> ${esc(x.name)}`).join("<br>")}</span></li>`).join("")}</ol>` : "";
+    return `<div class="wod-panel">${roundsTable}<div class="wod-hist">${hist}</div>${board ? `<div class="wod-board-row"><span class="extra">Leaderboard: ${esc(board.name)}${board.status === "closed" ? " (closed)" : ""}</span><span class="row">${startBtn}${canLog ? `<button class="btn" data-act="score-from-session" data-wod="${esc(board.id)}" data-sid="${esc(sid)}" data-bkey="${esc(b.key)}">Log score</button>` : `<a class="btn" href="#boards">See board</a>`}</span></div>` : startBtn ? `<div class="wod-board-row"><span class="extra">Timer only: there's no leaderboard for this WOD.</span>${startBtn}</div>` : ""}</div>`;
   }
 
   // ─── Rounds on a score, and the WOD timer (wodtimer.js, 011) ───────────────────────────

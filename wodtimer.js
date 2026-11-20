@@ -295,7 +295,8 @@
       else if (st.phase === "done") el.innerHTML = doneHTML();
       else {
         el.innerHTML = `<div class="wt-top"><span class="wt-name">${esc(p.title)}</span><button type="button" class="wt-x" data-wt="quit" aria-label="Stop timer">✕</button></div>
-          <div class="wt-main"><div class="wt-phase"></div><div class="wt-time"></div><div class="wt-sub"></div>${roundHTML()}<div class="wt-last"></div></div>
+          <div class="wt-main"><div class="wt-phase"></div><div class="wt-time"></div><div class="wt-sub"></div></div>
+          <div class="wt-side">${roundHTML()}<div class="wt-last"></div></div>
           <div class="wt-bottom"><button type="button" class="wt-btn" data-wt="pause">${st.phase === "paused" ? "Resume" : "Pause"}</button><button type="button" class="wt-btn" data-wt="split">Split</button><button type="button" class="wt-btn go" data-wt="finish">Finish</button></div>`;
         drawClock();
       }
@@ -322,7 +323,8 @@
       else if (a === "start") {
         readSetup();
         beep(1, 1); // unlocks audio on this tap
-        try { el.requestFullscreen && el.requestFullscreen().catch(() => {}); } catch (e) {}
+        // Full screen, and sideways where the browser allows it (Android); iPhone users turn the phone.
+        try { el.requestFullscreen && el.requestFullscreen().then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock("landscape").catch(() => {})).catch(() => {}); } catch (e) {}
         keepAwake();
         st.phase = "run"; st.start = now(); st.pausedTotal = 0;
         draw(); raf = requestAnimationFrame(tick);

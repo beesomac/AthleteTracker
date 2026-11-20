@@ -43,9 +43,7 @@ struct SessionDetailView: View {
                             Label("Start WOD", systemImage: "stopwatch")
                         }
                     }
-                    ForEach(block.exercises) { ex in
-                        ExerciseRow(program: program, exercise: ex, tick: model.tick(program, ex))
-                    }
+                    blockRows(block)
                 } header: {
                     HStack {
                         Text([block.key, block.name].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
@@ -68,6 +66,20 @@ struct SessionDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await model.reload() }
         .wodTimer($timer, log: logger(for: timerBlock))
+    }
+
+    /// A library WOD with rounds shows round by round (21.1: 1 + 10, 3 + 30, …);
+    /// everything else shows its exercises.
+    @ViewBuilder
+    private func blockRows(_ block: Block) -> some View {
+        let lib: LibraryWod? = WodLibrary.find(block.wod)
+        if let lib, let rounds = lib.roundSets, !rounds.isEmpty {
+            WodRoundsList(rounds: rounds, repeats: lib.roundRepeat)
+        } else {
+            ForEach(block.exercises) { (ex: Exercise) in
+                ExerciseRow(program: program, exercise: ex, tick: model.tick(program, ex))
+            }
+        }
     }
 
     private func startWod(_ block: Block) {
@@ -210,5 +222,35 @@ struct SetDots: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(tick?.sets.count ?? 0) of \(total) sets done")
+    }
+}
+
+/// A WOD's rounds, one line each: "Round 3 · 6 reps Wall Walk, 60 reps Double-under".
+struct WodRoundsList: View {
+    let rounds: [[WodSet]]
+    let repeats: Bool
+
+    var body: some View {
+        ForEach(rounds.indices, id: \.self) { (i: Int) in
+            WodRoundLine(label: repeats ? "Each round" : "Round \(i + 1)", sets: rounds[i])
+        }
+    }
+}
+
+struct WodRoundLine: View {
+    let label: String
+    let sets: [WodSet]
+
+    private var text: String {
+        sets.map { "\($0.target) \($0.name)" }.joined(separator: "\n")
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                .frame(minWidth: 70, alignment: .leading)
+            Text(text).font(.body)
+            Spacer(minLength: 0)
+        }
     }
 }

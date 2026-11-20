@@ -291,9 +291,20 @@ html.wt-open, html.wt-open body{overflow:hidden}
 .wt-main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;text-align:center;min-height:0}
 .wt-phase{font-size:13px;letter-spacing:.18em;text-transform:uppercase;font-weight:600;color:#9fb0c0}
 .wt.rest .wt-phase{color:#6fe0a6}
-.wt-time{font-family:var(--display);font-weight:700;font-size:min(34vw,30vh);line-height:.9;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.wt-time{font-family:"Orbitron",var(--display);font-weight:700;font-size:min(24vw,28vh);line-height:1;font-variant-numeric:tabular-nums;color:#ff3b29;text-shadow:0 0 18px rgba(255,59,41,.55);white-space:nowrap}
+.wt.rest .wt-time{color:#4cf27f;text-shadow:0 0 18px rgba(76,242,127,.5)}
+.wt-side{display:grid;justify-items:center;text-align:center}
 .wt-sub{font-size:16px;color:#b7c4d1;font-variant-numeric:tabular-nums;min-height:1.4em}
 .wt-round{margin-top:14px;display:grid;gap:6px;justify-items:center}
+/* Sideways phone: the clock fills the left, round and buttons on the right. */
+@media (orientation:landscape) and (max-height:600px){
+  .wt:not(:has(.wt-setup)){display:grid;grid-template-columns:1fr minmax(200px,27%);grid-template-rows:auto 1fr auto;grid-template-areas:"main top" "main side" "main bottom";gap:8px 18px;overflow:hidden}
+  .wt-top{grid-area:top}.wt-main{grid-area:main}.wt-side{grid-area:side;align-content:start}.wt-bottom{grid-area:bottom;grid-template-columns:1fr 1fr}
+  .wt-bottom .go{grid-column:1/-1}
+  .wt-time{font-size:min(16.5vw,60vh)}
+  .wt-round{margin-top:4px}.wt-round ul{font-size:15px}.wt-round li b{font-size:18px}.wt-rlabel{font-size:20px}
+  .wt-btn{padding:10px}
+}
 .wt-rlabel{font-family:var(--display);font-weight:600;font-size:24px;color:#f2703f}
 .wt-round ul{list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:18px}
 .wt-round li{color:#cfd8e1}
@@ -338,3 +349,6 @@ html.wt-open, html.wt-open body{overflow:hidden}
 .sd .seg button{border:0;background:none;padding:3px 8px;font:500 12px var(--body);color:var(--muted);cursor:pointer;text-transform:none;letter-spacing:0}
 .sd .seg button[aria-pressed="true"]{background:var(--ink);color:var(--surface)}
 .wod-rounds{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.wod-plan{list-style:none;margin:0 0 8px;padding:0;display:grid;gap:4px;font-size:14px}
+.wod-plan li{display:grid;grid-template-columns:76px 1fr;gap:8px;border-bottom:1px solid var(--line);padding-bottom:4px}
+.wod-plan li>span:first-child{color:var(--muted);font-weight:600;font-size:12px;padding-top:2px}
