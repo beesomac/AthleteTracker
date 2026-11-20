@@ -259,3 +259,17 @@ li.step-row.tick-only{grid-template-columns:34px 1fr 44px}
 li.step-row.tick-only .step-main{cursor:default}
 .kg-box.unit-reps .kg-input,.kg-box.unit-secs .kg-input{padding-right:32px}
 .block-note{white-space:pre-line;font-size:14px;color:var(--muted);margin:-4px 0 10px;line-height:1.45}
+
+/* Notifications bell + inbox, and the WOD panel in a session (007). */
+.bell{position:relative;display:inline-grid;place-items:center;width:32px;height:32px;border-radius:9px;color:var(--muted);text-decoration:none}
+.bell:hover,.bell.on{color:var(--ink)}
+.bell svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.bell .count{position:absolute;top:-3px;right:-5px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:var(--accent);color:#fff;font:700 10.5px/17px var(--body);text-align:center}
+.inbox{list-style:none;margin:0 0 14px;padding:0;display:grid;gap:6px}
+.inbox li>a,.inbox li>div{display:grid;gap:2px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);text-decoration:none;font-size:14px}
+.inbox li.new>a,.inbox li.new>div{border-left:4px solid var(--accent)}
+.wod-panel{border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin:0 0 12px;display:grid;gap:8px;font-size:14px;background:var(--surface)}
+.wod-hist ul{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:3px}
+.wod-hist li{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.wod-hist li>span:first-child{color:var(--muted);min-width:92px;font-size:13px}
+.wod-board-row{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}

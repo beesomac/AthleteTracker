@@ -10,6 +10,7 @@
     loaded: false, error: null, login: { sent: false, sending: false, error: null },
     openComposer: null, reviewFilter: "open", confirmDelete: null,
     fileSessions: [], wods: [], board: [], openScore: null,
+    notifications: null, myResults: [], seenNotifs: null,   // notifications null = 007 not run
   };
   const info = store.info;
   const W = window.WodScore;
@@ -237,6 +238,7 @@
     const h = (location.hash || "").slice(1);
     if (h === "notes") return { kind: "notes" };
     if (h === "records") return { kind: "records" };
+    if (h === "inbox" && state.notifications) return { kind: "inbox" };
     if (h === "boards" && info.v2) return { kind: "boards" };
     if (h.startsWith("session-")) { const id = h.slice(8); if (state.sessions.find((s) => s.id === id)) return { kind: "session", id }; }
     const latest = state.sessions[state.sessions.length - 1];
@@ -276,8 +278,10 @@
         : "";
       picker += `<a class="signout" href="console.html">Console</a>`;
     }
-    whoEl.innerHTML = `${picker}<span></span><button class="signout" data-act="signout">Sign out</button>`;
-    whoEl.querySelector("span").textContent = me;
+    const unread = (state.notifications || []).filter((x) => !x.read_at).length;
+    const bell = state.notifications && state.loaded ? `<a class="bell${unread ? " on" : ""}" href="#inbox" aria-label="Notifications${unread ? `, ${unread} new` : ""}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>${unread ? `<span class="count">${unread}</span>` : ""}</a>` : "";
+    whoEl.innerHTML = `${bell}${picker}<span class="me-name"></span><button class="signout" data-act="signout">Sign out</button>`;
+    whoEl.querySelector(".me-name").textContent = me;
   }
 
   function noteHTML(n, showWhere) {
@@ -414,7 +418,7 @@
       const circuit = active.length > 1;
       const roundsN = Math.max(0, ...active.map((ex) => ex.sets || 1));
       const lifts = liftHistory();
-      html += `<section class="block"><div class="block-head"><span class="letter">${esc(b.key)}</span><h3>${esc(b.name)}</h3>${roundsN ? `<span class="rounds">${roundsN} ${circuit ? "round" : "set"}${roundsN > 1 ? "s" : ""}</span>` : ""}</div>${b.note ? `<div class="block-note">${esc(b.note)}</div>` : ""}`;
+      html += `<section class="block"><div class="block-head"><span class="letter">${esc(b.key)}</span><h3>${esc(b.name)}</h3>${roundsN ? `<span class="rounds">${roundsN} ${circuit ? "round" : "set"}${roundsN > 1 ? "s" : ""}</span>` : ""}</div>${b.note ? `<div class="block-note">${esc(b.note)}</div>` : ""}${wodPanelHTML(b)}`;
       let setsHtml = "";
       if (active.length && active.every(tickOnly)) {
         setsHtml += `<div class="how">Tap the circle when it's done.</div><div class="round-grid">`;
@@ -585,6 +589,49 @@
     return html;
   }
 
+  // ─── WODs in a session: past scores and the leaderboard (007) ──────────────────────────
+  function wodHistory(b) {
+    const n = String(b.name || "").trim().toLowerCase();
+    const boards = state.wods.filter((w) => (b.wod && w.library_id === b.wod) || (n && w.name.trim().toLowerCase() === n) || w.id === b.board);
+    const ids = new Set(boards.map((w) => w.id));
+    return state.myResults.filter((r) => ids.has(r.wod_id))
+      .map((r) => Object.assign({ type: (boards.find((w) => w.id === r.wod_id) || {}).score_type }, r))
+      .sort((a, c) => String(c.performed_on).localeCompare(String(a.performed_on)));
+  }
+  function wodPanelHTML(b) {
+    if (!info.v2 || !(b.wod || b.board)) return "";
+    const board = b.board && state.wods.find((w) => w.id === b.board && w.status !== "draft");
+    const h = wodHistory(b), you = isTrainer() ? athleteName() : "You";
+    const txt = (r) => `${W.format(r.type, r.score)}${r.rx ? " Rx" : " scaled"}`;
+    let hist;
+    if (h.length) {
+      const best = W.rank(h[0].type, h.slice())[0];
+      hist = `<b>${esc(you)} ${isTrainer() ? "has" : "have"} done this before.</b><ul>${h.slice(0, 5).map((r) => `<li><span>${esc(fmtDate(r.performed_on))}</span><b>${esc(txt(r))}</b>${r === best && h.length > 1 ? ` <span class="chip back">Best</span>` : ""}${r.note ? ` <span class="extra">${esc(r.note)}</span>` : ""}</li>`).join("")}</ul>`;
+    } else hist = `<b>First time${isTrainer() ? " for " + esc(athleteName()) : ""}.</b> Your score today sets the benchmark.`;
+    const mine = !isTrainer() || info.athlete === String(state.me || "").toLowerCase();
+    const canLog = board && board.status === "open" && mine;
+    return `<div class="wod-panel"><div class="wod-hist">${hist}</div>${board ? `<div class="wod-board-row"><span class="extra">Leaderboard: ${esc(board.name)}${board.status === "closed" ? " (closed)" : ""}</span>${canLog ? `<button class="btn" data-act="score-from-session" data-wod="${esc(board.id)}">Log score</button>` : `<a class="btn" href="#boards">See board</a>`}</div>` : ""}</div>`;
+  }
+
+  // ─── Notifications inbox (007) ─────────────────────────────────────────────────────────
+  function renderInbox() {
+    const list = state.notifications || [];
+    const ago = (iso) => { const d = new Date(iso), m = Math.round((Date.now() - d) / 60000); return m < 1 ? "just now" : m < 60 ? m + " min ago" : m < 1440 ? Math.round(m / 60) + " h ago" : fmtDate(localDay(iso)); };
+    const link = (x) => x.kind === "wod_again" && x.session_id && state.sessions.some((s) => s.id === x.session_id) ? "#session-" + x.session_id : x.wod_id ? "#boards" : "";
+    let html = `<section class="hero"><div class="eyebrow">Notifications</div><h2>What's new</h2><div class="extra">New scores on your leaderboards, and WODs you've done before.</div></section>`;
+    if (!list.length) return html + `<div class="empty"><strong>Nothing yet</strong><span>When someone on one of your leaderboards logs a score, it shows up here.</span></div>`;
+    html += `<ul class="inbox">${list.map((x) => { const l = link(x); return `<li class="${x.read_at ? "" : "new"}">${l ? `<a href="${esc(l)}">` : "<div>"}<b>${esc(x.title)}</b>${x.body ? `<span>${esc(x.body)}</span>` : ""}<span class="extra">${esc(ago(x.created_at))}</span>${l ? "</a>" : "</div>"}</li>`; }).join("")}</ul>`;
+    return html + `<div class="row"><button class="btn" data-act="clear-inbox">Clear all</button></div>`;
+  }
+  function markInboxRead() {
+    const ids = (state.notifications || []).filter((x) => !x.read_at).map((x) => x.id);
+    if (!ids.length) return;
+    const now = new Date().toISOString();
+    for (const x of state.notifications) if (!x.read_at) x.read_at = now;
+    store.markNotificationsRead(ids);
+    setTimeout(renderWho, 1500);
+  }
+
   // Leaderboards: every open or closed WOD, best score per athlete, and a form to log your own.
   function renderBoards() {
     const wods = state.wods.filter((w) => w.status !== "draft");
@@ -642,6 +689,7 @@
     else if (view.kind === "notes") html = renderNotes();
     else if (view.kind === "records") html = renderRecords();
     else if (view.kind === "boards") html = renderBoards();
+    else if (view.kind === "inbox") { html = renderInbox(); markInboxRead(); }
     else if (view.kind === "session") html = renderSession(state.sessions.find((s) => s.id === view.id));
     else html = `<div class="empty"><strong>No sessions yet</strong><span>${info.v2 ? (isTrainer() ? "Publish a program for this athlete from the console and it appears here." : "Your trainer hasn't published a program for you yet.") : "Add a session file to the sessions folder and it appears here."}</span></div>`;
     app.innerHTML = html;
@@ -918,6 +966,11 @@
     } else if (act === "open-score") {
       state.openScore = state.openScore === btn.dataset.wod ? null : btn.dataset.wod; render();
       const el = document.getElementById("score-text"); if (el) el.focus();
+    } else if (act === "score-from-session") {
+      state.openScore = btn.dataset.wod; location.hash = "boards";
+      setTimeout(() => { const el = document.getElementById("score-text"); if (el) { el.scrollIntoView({ block: "center" }); el.focus(); } }, 50);
+    } else if (act === "clear-inbox") {
+      try { await store.clearNotifications(); } catch (e) { writeFailed(e); }
     } else if (act === "cancel-score") {
       state.openScore = null; render();
     } else if (act === "signout") {
@@ -955,6 +1008,14 @@
       await store.start((data) => {
         state.ticks = data.ticks; state.notes = data.notes; state.finishes = data.finishes || {}; state.maxes = data.maxes || {};
         state.wods = data.wods || []; state.board = data.board || [];
+        state.myResults = data.myResults || [];
+        state.notifications = data.notifications;
+        // A notification that arrives while the log is open pops up once.
+        if (state.notifications) {
+          const fresh = state.seenNotifs ? state.notifications.filter((x) => !x.read_at && !state.seenNotifs.has(x.id)) : [];
+          state.seenNotifs = new Set(state.notifications.map((x) => x.id));
+          if (fresh.length && currentView().kind !== "inbox") flash(fresh.length === 1 ? fresh[0].title + (fresh[0].body ? ": " + fresh[0].body : "") : `${fresh.length} new notifications`);
+        }
         // Programs published from the console replace the sessions/ files once there are any.
         state.sessions = data.programs && data.programs.length
           ? data.programs.slice().sort((a, b) => (a.date < b.date ? -1 : 1))

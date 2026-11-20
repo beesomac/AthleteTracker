@@ -63,7 +63,7 @@
     }
 
     async function loadAll() {
-      const [t, n, f, m, p, w, b] = await Promise.all([
+      const [t, n, f, m, p, w, b, nt, mr] = await Promise.all([
         scoped(sb.from("ticks").select("*")),
         scoped(sb.from("notes").select("*")).order("created_at", { ascending: true }),
         scoped(sb.from("session_finishes").select("*")),
@@ -71,6 +71,10 @@
         info.v2 ? sb.from("programs").select("*").eq("published", true).order("date") : null,
         info.v2 ? sb.from("wods").select("*").order("created_at", { ascending: false }) : null,
         info.v2 ? sb.rpc("wod_board") : null,
+        // 007: your own notifications (the signed-in person's, whichever athlete a trainer is viewing).
+        info.v2 ? sb.from("notifications").select("*").eq("recipient_email", (email || "").toLowerCase()).order("created_at", { ascending: false }).limit(60) : null,
+        // Every WOD score of the athlete being viewed, for "you've done this before".
+        info.v2 ? scoped(sb.from("wod_results").select("id, wod_id, athlete_email, score, rx, performed_on, note, hidden, created_at")) : null,
       ]);
       if (t.error) throw t.error;
       if (n.error) throw n.error;
@@ -91,6 +95,8 @@
       return {
         ticks, notes: n.data.map(fromNoteRow), finishes, maxes, programs,
         wods: w && !w.error ? w.data : [], board: b && !b.error ? b.data : [],
+        notifications: nt && !nt.error ? nt.data : null,   // null = 007 not run
+        myResults: mr && !mr.error ? mr.data.filter((r) => !r.hidden) : [],
       };
     }
     function scheduleReload() {
@@ -145,7 +151,7 @@
           .on("postgres_changes", { event: "*", schema: "public", table: "session_finishes" }, scheduleReload)
           .on("postgres_changes", { event: "*", schema: "public", table: "lift_maxes" }, scheduleReload);
         if (info.v2) {
-          for (const table of ["programs", "wods", "wod_results"]) channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, scheduleReload);
+          for (const table of ["programs", "wods", "wod_results", "notifications"]) channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, scheduleReload);
         }
         channel = channel.subscribe();
         // Catch up when the phone wakes the tab back up.
@@ -192,6 +198,16 @@
       async deleteNote(id) {
         const { error } = await sb.from("notes").delete().eq("id", id);
         if (error) throw error;
+      },
+      async markNotificationsRead(ids) {
+        if (!ids.length) return;
+        const { error } = await sb.from("notifications").update({ read_at: new Date().toISOString() }).in("id", ids);
+        if (error) console.warn(error);
+      },
+      async clearNotifications() {
+        const { error } = await sb.from("notifications").delete().eq("recipient_email", (email || "").toLowerCase());
+        if (error) throw error;
+        if (listener) listener(await loadAll());
       },
       // An athlete logging their own WOD score.
       async addResult(r) {
