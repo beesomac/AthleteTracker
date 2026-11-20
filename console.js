@@ -13,7 +13,7 @@
     login: {}, athleteFilter: "", notesFilter: "open", confirm: null,
     editingMember: null, edit: null, reply: null, editingWod: false, fileIds: null,
     fileSessions: [], librarySeed: null, wodSeed: null, wodDraft: null, pendingWod: null,
-    boardMembers: null, boardAsk: null,   // boardMembers null = 007_wod_boards.sql not run yet
+    boardMembers: null, boardAsk: null, reorder: null,   // reorder: { athlete, ids } while reordering programs   // boardMembers null = 007_wod_boards.sql not run yet
     builder: { query: "", cat: "", target: null, open: new Set(), confirm: null, libTab: "ex", wodGroup: "open", wodInfo: null },
     libPage: { query: "", cat: "", wodGroup: "open", open: null },
   };
@@ -187,7 +187,10 @@
     const missingFiles = (state.fileIds || []).filter((id) => !state.programs.some((p) => p.id === id));
     let html = `<section class="hero"><div class="eyebrow">Session plans</div><h2>Programs</h2>
       <div class="toolbar"><select class="filter-athlete" aria-label="Athlete">${athleteOptions(f, { all: true })}</select>
+        ${f && ownPrograms(f).length > 1 && !state.reorder ? `<button class="btn" data-act="reorder-start">Reorder sessions</button>` : ""}
         <a class="btn primary" href="#program-new">New program</a></div></section>`;
+    if (state.reorder && state.reorder.athlete === f) return html + reorderHTML();
+    state.reorder = null;
     if (missingFiles.length && activeAthletes().length) {
       html += `<section class="card callout"><b>${missingFiles.length} session file${missingFiles.length > 1 ? "s" : ""} not imported yet.</b>
         <span class="extra">The sessions/ folder in the repo still has programs the console hasn't got. Import them for:</span>
@@ -208,11 +211,76 @@
         <td data-l="Status">${p.published ? `<span class="chip back">Published</span>` : `<span class="chip hold">Draft</span>`}</td>
         <td data-l="Sets">${sets}</td>
         <td data-l="Feedback">${notes ? `${notes} note${notes > 1 ? "s" : ""}` : ""}${notes && fins ? " · " : ""}${fins ? `${fins} finished` : ""}${!notes && !fins ? `<span class="extra">–</span>` : ""}</td>
-        <td class="actions"><button class="btn" data-act="toggle-publish" data-id="${esc(p.id)}">${p.published ? "Unpublish" : "Publish"}</button>
+        <td class="actions"><a class="btn" href="#program-${encodeURIComponent(p.id)}">Edit</a><button class="btn" data-act="toggle-publish" data-id="${esc(p.id)}">${p.published ? "Unpublish" : "Publish"}</button>
           <button class="btn" data-act="duplicate" data-id="${esc(p.id)}">Duplicate</button>
           <button class="btn danger" data-act="del-program" data-id="${esc(p.id)}">${state.confirm === key ? "Tap again to delete" : "Delete"}</button></td></tr>`;
     }
     return html + `</tbody></table></div>`;
+  }
+
+  // ─── reorder an athlete's sessions ─────────────────────────────────────────────────────
+  // Athletes see sessions in date order, so reordering keeps the same dates and moves the
+  // programs between them: the first in the new order gets the earliest date, and so on.
+  // Programs for "All athletes" aren't included, because moving them would move them for everyone.
+  const byDate = (a, b) => String(a.date).localeCompare(String(b.date)) || String(a.id).localeCompare(String(b.id));
+  function ownPrograms(email) { return state.programs.filter((p) => p.athlete_email === email).sort(byDate); }
+  const isSessionLabel = (s) => /^Session \d+$/.test(String(s || "").trim());
+  function reorderHTML() {
+    const r = state.reorder, progs = ownPrograms(r.athlete), slots = progs.map((p) => p.date);
+    const byId = Object.fromEntries(progs.map((p) => [p.id, p]));
+    // Someone else added or deleted a program meanwhile: keep the order, drop gone ones, add new ones at the end.
+    r.ids = r.ids.filter((id) => byId[id]).concat(progs.map((p) => p.id).filter((id) => !r.ids.includes(id)));
+    const canRenumber = progs.every((p) => !p.body.short || isSessionLabel(p.body.short));
+    const rows = r.ids.map((id, i) => {
+      const p = byId[id]; const moved = p.date !== slots[i];
+      return `<li draggable="true" data-i="${i}" class="${moved ? "moved" : ""}"><span class="grip" aria-hidden="true"></span><span class="pos">${i + 1}</span>
+        <span class="slot">${esc(fmtDate(slots[i]))}${moved ? " ←" : ""}</span>
+        <span class="ttl"><b>${esc(p.title)}</b> <span class="extra">${esc(p.body.short || "")}${p.published ? "" : " · draft"}</span></span>
+        <button type="button" data-act="reorder-move" data-i="${i}" data-d="-1" ${i === 0 ? "disabled" : ""} aria-label="Move ${esc(p.title)} earlier">↑</button>
+        <button type="button" data-act="reorder-move" data-i="${i}" data-d="1" ${i === r.ids.length - 1 ? "disabled" : ""} aria-label="Move ${esc(p.title)} later">↓</button></li>`;
+    }).join("");
+    return `<section class="card"><div class="card-head"><h3>Reorder ${esc(nameOf(r.athlete))}'s sessions</h3></div>
+      <div class="extra">Drag sessions, or use the arrows. The dates stay where they are and the sessions move between them; a date in orange is changing. Programs for all athletes aren't moved.</div>
+      <ol class="reorder-list" id="reorder-list">${rows}</ol>
+      ${canRenumber ? `<label class="check"><input type="checkbox" id="reorder-renumber" ${r.renumber ? "checked" : ""}> Renumber the tabs (Session 1, Session 2…) to match</label>` : ""}
+      <div class="row"><button class="btn" data-act="reorder-cancel">Cancel</button><button class="btn primary" data-act="reorder-save">Save order</button></div></section>`;
+  }
+  async function saveReorder() {
+    const r = state.reorder, progs = ownPrograms(r.athlete), slots = progs.map((p) => p.date);
+    const byId = Object.fromEntries(progs.map((p) => [p.id, p]));
+    const renumber = !!($("#reorder-renumber") && $("#reorder-renumber").checked);
+    const now = new Date().toISOString(), jobs = [];
+    r.ids.forEach((id, i) => {
+      const p = byId[id], upd = {};
+      if (p.date !== slots[i]) upd.date = slots[i];
+      if (renumber && (p.body.short || "") !== "Session " + (i + 1)) upd.body = Object.assign({}, p.body, { short: "Session " + (i + 1) });
+      if (Object.keys(upd).length) jobs.push(sb.from("programs").update(Object.assign(upd, { updated_at: now })).eq("id", id));
+    });
+    if (!jobs.length) { state.reorder = null; render(); return; }
+    const res = await Promise.all(jobs);
+    const bad = res.find((x) => x.error);
+    if (bad) return failed(bad.error);
+    state.reorder = null;
+    await loadAll(); render(); flash(`New order saved (${jobs.length} session${jobs.length > 1 ? "s" : ""} changed).`, "ok");
+  }
+  function reorderMove(from, to) {
+    const ids = state.reorder.ids; if (to < 0 || to >= ids.length || from === to) return;
+    const [id] = ids.splice(from, 1); ids.splice(to, 0, id); render();
+  }
+  {
+    let dragI = null;
+    app.addEventListener("dragstart", (ev) => { const li = ev.target.closest && ev.target.closest("#reorder-list li"); if (!li) return; dragI = Number(li.dataset.i); li.classList.add("dragging"); ev.dataTransfer.effectAllowed = "move"; ev.dataTransfer.setData("text/plain", "session"); });
+    app.addEventListener("dragover", (ev) => {
+      if (dragI == null) return; const list = ev.target.closest && ev.target.closest("#reorder-list"); if (!list) return;
+      ev.preventDefault(); list.querySelectorAll(".drop-before").forEach((x) => x.classList.remove("drop-before"));
+      const li = ev.target.closest("li"); if (li) li.classList.add("drop-before");
+    });
+    app.addEventListener("drop", (ev) => {
+      if (dragI == null) return; const li = ev.target.closest && ev.target.closest("#reorder-list li"); if (!li) return;
+      ev.preventDefault(); let to = Number(li.dataset.i); const from = dragI; dragI = null;
+      if (to > from) to--; reorderMove(from, to);
+    });
+    app.addEventListener("dragend", () => { dragI = null; app.querySelectorAll("#reorder-list .dragging,#reorder-list .drop-before").forEach((x) => x.classList.remove("dragging", "drop-before")); });
   }
 
   // A new program starts with the usual block layout, empty; drag exercises in from the library.
@@ -774,6 +842,7 @@
   app.addEventListener("change", async (ev) => {
     const el = ev.target;
     if (el.dataset.ask != null && state.boardAsk) { state.boardAsk.items[Number(el.dataset.ask)].choice = el.value; return; }
+    if (el.id === "reorder-renumber" && state.reorder) { state.reorder.renumber = el.checked; return; }
     if (el.classList.contains("filter-athlete")) { state.athleteFilter = el.value; render(); return; }
     if (el.id === "program-file" && el.files && el.files[0]) {
       const text = await el.files[0].text();
@@ -814,7 +883,12 @@
     else if (act === "toggle-publish") {
       const p = state.programs.find((x) => x.id === id); if (!p) return;
       await run(sb.from("programs").update({ published: !p.published, updated_at: new Date().toISOString() }).eq("id", id), p.published ? "Unpublished." : "Published.");
-    } else if (act === "duplicate") {
+    } else if (act === "reorder-start") {
+      const f = state.athleteFilter; state.reorder = { athlete: f, ids: ownPrograms(f).map((p) => p.id), renumber: false }; render();
+    } else if (act === "reorder-move") { reorderMove(Number(btn.dataset.i), Number(btn.dataset.i) + Number(btn.dataset.d)); }
+    else if (act === "reorder-cancel") { state.reorder = null; render(); }
+    else if (act === "reorder-save") { btn.disabled = true; await saveReorder(); }
+    else if (act === "duplicate") {
       const p = state.programs.find((x) => x.id === id); if (!p) return;
       const copyId = newProgramId(today());
       const ok = await run(sb.from("programs").insert({ id: copyId, athlete_email: p.athlete_email, date: today(), title: p.title + " (copy)", body: p.body, published: false, created_by_email: state.me }), "Copied as a draft. Change the athlete or date and save.");
