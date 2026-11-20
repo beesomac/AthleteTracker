@@ -40,7 +40,7 @@ Session fields:
 | `short`, `title` | Tab label (e.g. "Session 3") and the heading |
 | `summary` | The ankle check shown at the top |
 | `blocks[]` | `key` (A, B… or 1, 2…), `name`, optional `rounds`, `note` (text shown above the block, e.g. a WOD's full write-up), `wod` (the id of the library WOD it came from) |
-| `blocks[].exercises[]` | `id`, `name`, `sets` (number of tick circles), `target` (e.g. "10 reps"), optional `status` (`new`, `back`, `swap`, `watch`, `hold`), `cue`, `extra` (RPE / previous loads), `search` (YouTube search words), `video` (a specific YouTube link, replaces the search; YouTube links also play inline), `log` (what each set asks for: `"kg"` a weight box, reps change on tap; `"reps"` a reps box for bodyweight work; `"secs"` a seconds box for holds; `"tick"` a plain done/not done item, e.g. a follow-along video. Without it, a target in seconds such as "30 s" gets a seconds box and anything else a kg box), `pct` (e.g. `0.75` to suggest 75% of the lift's estimated 1RM), `pcts` (one % per set, e.g. `[0.7, 0.75, 0.8]`, so later sets scale up or down from the weight typed in), `suggestKg` (a fixed suggested weight) |
+| `blocks[].exercises[]` | `id`, `name`, `sets` (number of tick circles), `target` (e.g. "10 reps"), optional `status` (`new`, `back`, `swap`, `watch`, `hold`), `cue`, `extra` (RPE / previous loads), `search` (YouTube search words), `video` (a specific YouTube link, replaces the search; YouTube links also play inline), `log` (what each set asks for: `"kg"` a weight box, reps change on tap; `"reps"` a reps box for bodyweight work; `"secs"` a seconds box for holds; `"tick"` a plain done/not done item, e.g. a follow-along video; `"1rm"` a 1RM test: a kg box, and a heavier single fills in that lift's 1RM (a target or name with "1RM" or "1 rep max" counts too). Without it, a target in seconds such as "30 s" gets a seconds box and anything else a kg box), `pct` (e.g. `0.75` to suggest 75% of the lift's estimated 1RM), `pcts` (one % per set, e.g. `[0.7, 0.75, 0.8]`, so later sets scale up or down from the weight typed in), `suggestKg` (a fixed suggested weight) |
 | `next[]` | Next progressions, listed at the bottom |
 | `planUrl`, `planLabel` | Link to the full plan, and its link text |
 | `summaryLabel` | Label for `summary` (default "Ankle check") |
@@ -79,6 +79,7 @@ Everything lives in Supabase, readable with the anon key plus a signed-in user, 
 | `ticks`, `notes`, `session_finishes`, `lift_maxes` | Per-athlete feedback, keyed by `athlete_email` + `session_id` (= program `id`) |
 | `wods`, `wod_board()` | WODs and their ranked boards (names only, best score per athlete). Scores: seconds for time, reps, kg, or rounds × 1000 + reps; `wod.js` formats them |
 | `wod_results` | An athlete's own scores; insert one to log a score on an open WOD |
+| `log_benchmark()` | From `supabase/008_benchmarks.sql`: log a benchmark (wods.json id) and open its leaderboard if there isn't one |
 | `wod_board_members` | (007) Who is on each leaderboard; an athlete can read their own rows |
 | `notifications` | (007) Each person's inbox: `kind` `score`, `board_added` or `wod_again`, `title`, `body`, `read_at`; read and mark your own |
 

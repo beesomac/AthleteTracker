@@ -130,6 +130,13 @@ nonisolated struct Exercise: Decodable, Sendable, Identifiable {
 
     var setCount: Int { max(0, Int(sets ?? 0)) }
 
+    /// A 1RM test: `log: "1rm"`, or a target/name like "1RM", "build to 1 rep max".
+    /// Logging one fills in that lift's 1RM benchmark.
+    var isOneRepMax: Bool {
+        log == "1rm" || Lift.mentionsOneRepMax(name) || Lift.mentionsOneRepMax(target ?? "")
+    }
+    var liftKey: String { Lift.key(name) }
+
     enum CodingKeys: String, CodingKey { case id, name, sets, target, status, cue, extra, search, video, log, suggestKg }
 
     init(from decoder: Decoder) throws {
@@ -182,16 +189,22 @@ nonisolated struct TickRow: Decodable, Sendable {
     }
 }
 
-nonisolated struct SetEntry: Decodable, Sendable {
+nonisolated struct SetEntry: Codable, Sendable {
+    var at: String?
     var reps: Double?
     var kg: Double?
     var secs: Double?
 
-    enum CodingKeys: String, CodingKey { case reps, kg, secs }
+    enum CodingKeys: String, CodingKey { case at, reps, kg, secs }
+
+    init(at: String? = nil, reps: Double? = nil, kg: Double? = nil, secs: Double? = nil) {
+        self.at = at; self.reps = reps; self.kg = kg; self.secs = secs
+    }
 
     init(from decoder: Decoder) throws {
         // Older ticks stored `true` for a done set; treat anything as "done".
         guard let c = try? decoder.container(keyedBy: CodingKeys.self) else { return }
+        at = c.lossyString(.at)
         reps = c.lossyDouble(.reps)
         kg = c.lossyDouble(.kg)
         secs = c.lossyDouble(.secs)
@@ -251,13 +264,18 @@ nonisolated enum SessionDate {
 
     /// Today as "YYYY-MM-DD" in the phone's time zone, to compare with program dates.
     static var today: String {
-        Date.now.formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day())
+        string(.now)
     }
 
     /// Parses a timestamp from the database, with or without fractional seconds.
     static func timestamp(_ s: String) -> Date? {
         (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(s))
             ?? (try? Date.ISO8601FormatStyle().parse(s))
+    }
+
+    /// A local calendar day as "YYYY-MM-DD".
+    static func string(_ d: Date) -> String {
+        d.formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day())
     }
 
     static func label(_ s: String) -> String {

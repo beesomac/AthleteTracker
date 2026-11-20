@@ -87,7 +87,11 @@
     return v;
   }
   function targetReps(ex) { const m = /^(\d+)/.exec(ex.target || ""); return m ? +m[1] : ""; }
-  const liftKey = (name) => String(name).toLowerCase().replace(/\(.*?\)/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+  // A 1RM test: log "1rm", or "1RM" / "1 rep max" in the target or name. Logging one fills in the lift's 1RM.
+  const ONE_RM = /\b(1\s*rm|1\s*rep\s*max|one\s*rep\s*max)\b/gi;
+  const isOneRepMax = (ex) => !!ex && (ex.log === "1rm" || new RegExp(ONE_RM.source, "i").test(`${ex.name || ""} ${ex.target || ""}`));
+  // Same key as the iOS app's Lift.key(): "Back Squat (high bar) 1RM" → "back squat".
+  const liftKey = (name) => String(name).toLowerCase().replace(/\(.*?\)/g, "").replace(ONE_RM, "").replace(/[^a-z0-9]+/g, " ").trim();
   // Epley estimate. Only trusted up to 12 reps; above that it's too rough to call a 1RM.
   function est1RM(kg, reps) { if (!kg || !reps || reps > 12) return null; return reps === 1 ? kg : kg * (1 + reps / 30); }
   const round1 = (x) => Math.round(x * 10) / 10;
@@ -709,7 +713,21 @@
     const prev = state.ticks[id] || { sets: {} };
     const next = Object.assign({ session: sid, ex: eid, sets: {}, skipped: false, skipReason: "" }, prev, patch, { by: state.me, at: new Date().toISOString() });
     state.ticks[id] = next; scheduleRender();
-    try { await store.saveTick(sid, eid, next); } catch (e) { state.ticks[id] = prev; scheduleRender(); writeFailed(e); }
+    try { await store.saveTick(sid, eid, next); autofillOneRepMax(sid, eid, next.sets); } catch (e) { state.ticks[id] = prev; scheduleRender(); writeFailed(e); }
+  }
+  // A heavier single on a 1RM test becomes the lift's 1RM (Benchmarks in the iOS app).
+  async function autofillOneRepMax(sid, eid, sets) {
+    const ex = findEx(sid, eid);
+    if (!isOneRepMax(ex)) return;
+    let best = 0;
+    for (const v of Object.values(sets || {})) { const i = setInfo(v); if (i && +i.kg > best && (!i.reps || +i.reps === 1)) best = +i.kg; }
+    const k = liftKey(ex.name), m = state.maxes[k];
+    if (!best || (m && +m.kg >= best)) return;
+    const name = String(ex.name).replace(ONE_RM, "").replace(/[\s\-–·:]+$/, "").trim();
+    const on = localDay(new Date().toISOString());
+    const keep = m;
+    state.maxes[k] = { lift: k, name, kg: best, on, by: state.me }; scheduleRender();
+    try { await store.saveMax(k, name, best, on); } catch (e) { if (keep) state.maxes[k] = keep; else delete state.maxes[k]; scheduleRender(); writeFailed(e); }
   }
   function findEx(sid, eid) {
     const s = state.sessions.find((x) => x.id === sid);
@@ -813,7 +831,7 @@
       const id = tickId(sid, eid);
       const next = Object.assign({ session: sid, ex: eid, sets: {}, skipped: false, skipReason: "" }, prev, { sets, by: state.me, at: new Date().toISOString() });
       state.ticks[id] = next; scheduleRender();
-      try { await store.saveTick(sid, eid, next); } catch (e) { state.ticks[id] = prev; scheduleRender(); writeFailed(e); }
+      try { await store.saveTick(sid, eid, next); autofillOneRepMax(sid, eid, sets); } catch (e) { state.ticks[id] = prev; scheduleRender(); writeFailed(e); }
       return;
     }
     if (ev.target.id !== "login-form") return;

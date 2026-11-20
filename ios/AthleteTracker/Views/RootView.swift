@@ -13,7 +13,7 @@ struct RootView: View {
         case .notAMember(let email):
             NotAMemberView(email: email)
         case .signedIn:
-            SessionsListView()
+            MainTabView()
         }
     }
 }
