@@ -906,4 +906,5 @@
     if (data.session) await enter(data.session.user.email); else render();
   }
   boot();
+  if (window.TrainingStore.watchForUpdates) window.TrainingStore.watchForUpdates(["console.js", "builder.js", "store.js", "wod.js"]);
 })();

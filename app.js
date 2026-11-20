@@ -1043,4 +1043,5 @@
     if (email) await enter(email); else render();
   }
   boot();
+  if (window.TrainingStore.watchForUpdates) window.TrainingStore.watchForUpdates(["app.js", "store.js", "wod.js"]);
 })();

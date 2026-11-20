@@ -283,6 +283,33 @@
 
   const configured = cfg.supabaseUrl && cfg.supabaseAnonKey && window.supabase;
   window.TrainingStore = { create: () => (configured ? supabaseStore() : localStore()), tickKey };
+  // A tab left open across a deploy keeps running the old code. When the tab comes back into view
+  // (and every 10 minutes), compare the scripts' ETags with the ones it loaded, and if any changed
+  // show a bar that reloads the page.
+  window.TrainingStore.watchForUpdates = (files) => {
+    const tags = {};
+    const etag = (f) => fetch(f, { method: "HEAD", cache: "no-cache" }).then((r) => (r.ok && r.headers.get("etag")) || null).catch(() => null);
+    let shown = false;
+    async function check() {
+      if (shown || document.hidden) return;
+      for (const f of files) {
+        const t = await etag(f);
+        if (!t) continue;
+        if (!(f in tags)) { tags[f] = t; continue; }
+        if (tags[f] !== t) { shown = true; show(); return; }
+      }
+    }
+    function show() {
+      const bar = document.createElement("div");
+      bar.className = "update-bar";
+      bar.innerHTML = `<span>A new version is ready.</span><button type="button">Reload</button>`;
+      bar.querySelector("button").addEventListener("click", () => location.reload());
+      document.body.appendChild(bar);
+    }
+    check();
+    document.addEventListener("visibilitychange", check);
+    setInterval(check, 10 * 60 * 1000);
+  };
   window.TrainingStore.createClient = () => (configured ? window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
   }) : null);
