@@ -1,0 +1,104 @@
+import Foundation
+import Observation
+import Supabase
+import UIKit
+import UserNotifications
+
+/// Apple push notifications. After sign-in the app asks once for permission, registers with
+/// APNs and saves this phone's token in `device_tokens` (supabase/009_push.sql). New rows in
+/// `notifications` are then pushed by the "push" edge function. Signing out removes the token.
+@Observable
+final class Push {
+    static let shared = Push()
+
+    /// Set when a notification is tapped; MainTabView switches to the matching tab.
+    var openedKind: String?
+
+    private var token: String?
+    private var signedIn = false
+
+    /// Debug builds from Xcode get sandbox tokens; TestFlight and App Store builds get production.
+    /// (The edge function corrects a wrong guess by itself.)
+    private var environment: String {
+        #if DEBUG
+        return "sandbox"
+        #else
+        return "production"
+        #endif
+    }
+
+    /// Call after a member signs in. Only the first call shows the permission prompt.
+    func signedInAsMember() async {
+        signedIn = true
+        let center = UNUserNotificationCenter.current()
+        let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+        guard granted else { return }
+        UIApplication.shared.registerForRemoteNotifications()
+        if token != nil { await upload() }
+    }
+
+    /// Call before signing out, while the session can still delete the token.
+    func signingOut() async {
+        signedIn = false
+        guard let token else { return }
+        _ = try? await supabase.rpc("unregister_device_token", params: ["p_token": token]).execute()
+    }
+
+    func gotToken(_ data: Data) {
+        token = data.map { String(format: "%02x", $0) }.joined()
+        Task { await upload() }
+    }
+
+    private func upload() async {
+        guard signedIn, let token else { return }
+        do {
+            try await supabase.rpc("register_device_token",
+                                   params: ["p_token": token, "p_environment": environment]).execute()
+        } catch {
+            print("Push: couldn't save device token:", error)
+        }
+    }
+
+    /// A notification was tapped: mark it read (same as clicking it in the web bell) and open its tab.
+    func opened(id: String?, kind: String?) {
+        openedKind = kind
+        guard let id else { return }
+        Task {
+            _ = try? await supabase.from("notifications")
+                .update(["read_at": ISO8601DateFormatter().string(from: Date())])
+                .eq("id", value: id)
+                .execute()
+        }
+    }
+}
+
+/// Receives the APNs token and notification taps from iOS.
+final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
+        return true
+    }
+
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        Push.shared.gotToken(deviceToken)
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        print("Push: registration failed:", error.localizedDescription)
+    }
+
+    /// Show the banner even when the app is open.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                            willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        [.banner, .list, .sound]
+    }
+
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                            didReceive response: UNNotificationResponse) async {
+        let info = response.notification.request.content.userInfo
+        let id = info["id"] as? String
+        let kind = info["kind"] as? String
+        await MainActor.run { Push.shared.opened(id: id, kind: kind) }
+    }
+}
