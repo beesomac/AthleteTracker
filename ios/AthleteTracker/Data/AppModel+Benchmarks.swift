@@ -17,11 +17,20 @@ extension AppModel {
         let boardRows: [BoardRow] = (try? await supabase.rpc("wod_board").execute().value) ?? []
         board = boardRows
 
-        let resultRows: [ResultRow] = (try? await supabase.from("wod_results")
-            .select("id, wod_id, score, rx, performed_on, note")
-            .eq("athlete_email", value: athlete)
-            .order("performed_on", ascending: false)
-            .execute().value) ?? []
+        // With round detail when supabase/011 has run; without it on older databases.
+        func resultQuery(_ cols: String) async throws -> [ResultRow] {
+            try await supabase.from("wod_results")
+                .select(cols)
+                .eq("athlete_email", value: athlete)
+                .order("performed_on", ascending: false)
+                .execute().value
+        }
+        let resultRows: [ResultRow]
+        if let rows = try? await resultQuery("id, wod_id, score, rx, performed_on, note, detail") {
+            resultRows = rows
+        } else {
+            resultRows = (try? await resultQuery("id, wod_id, score, rx, performed_on, note")) ?? []
+        }
         results = resultRows
 
         let maxRows: [LiftMax] = (try? await supabase.from("lift_maxes")
@@ -76,29 +85,59 @@ extension AppModel {
     // MARK: Logging scores
 
     /// Log a score on a leaderboard. Athletes can only add to open boards (database rule).
-    func logResult(on wod: WodRow, score: Double, rx: Bool, on day: Date, note: String) async throws {
+    /// `detail` (rounds, splits) needs supabase/011; before that, round times go into the note.
+    func logResult(on wod: WodRow, score: Double, rx: Bool, on day: Date, note: String, detail: WodDetail? = nil) async throws {
         guard let athlete = athleteEmail else { return }
-        try await supabase.from("wod_results").insert(NewResult(
-            wod_id: wod.id, athlete_email: athlete, score: score, rx: rx,
-            performed_on: SessionDate.string(day), note: note.isEmpty ? nil : note, entered_by_email: email
-        )).execute()
+        func row(_ note: String, _ detail: WodDetail?) -> NewResult {
+            NewResult(wod_id: wod.id, athlete_email: athlete, score: score, rx: rx,
+                      performed_on: SessionDate.string(day), note: note.isEmpty ? nil : String(note.prefix(500)),
+                      entered_by_email: email, detail: detail)
+        }
+        do {
+            try await supabase.from("wod_results").insert(row(note, detail)).execute()
+        } catch where detail != nil && Self.missingDetailColumn(error) {
+            try await supabase.from("wod_results").insert(row(Self.noteWithRounds(note, detail), nil)).execute()
+        }
         await loadBenchmarks(for: athlete)
+    }
+
+    nonisolated static func missingDetailColumn(_ error: Error) -> Bool {
+        let text = "\(error)"
+        return text.contains("detail") && (text.contains("PGRST204") || text.contains("column"))
+    }
+
+    nonisolated static func noteWithRounds(_ note: String, _ detail: WodDetail?) -> String {
+        guard let summary = detail?.summary else { return note }
+        return note.isEmpty ? summary : note + " · " + summary
     }
 
     /// Log a benchmark WOD. Uses its open leaderboard if there is one; otherwise the database
     /// opens one (supabase/008_benchmarks.sql).
-    func logBenchmark(_ lib: LibraryWod, score: Double, rx: Bool, on day: Date, note: String) async throws {
+    func logBenchmark(_ lib: LibraryWod, score: Double, rx: Bool, on day: Date, note: String, detail: WodDetail? = nil) async throws {
         if let open = boards(for: lib).first(where: \.isOpen) {
-            try await logResult(on: open, score: score, rx: rx, on: day, note: note)
+            try await logResult(on: open, score: score, rx: rx, on: day, note: note, detail: detail)
             return
         }
         guard let athlete = athleteEmail else { return }
         do {
-            try await supabase.rpc("log_benchmark", params: BenchmarkParams(
+            let id: String = try await supabase.rpc("log_benchmark", params: BenchmarkParams(
                 p_library_id: lib.id, p_name: lib.name, p_score_type: lib.score, p_score: score, p_rx: rx,
                 p_performed_on: SessionDate.string(day), p_note: note.isEmpty ? nil : note,
                 p_description: lib.description, p_athlete: athlete
-            )).execute()
+            )).execute().value
+            // The RPC doesn't take round detail; add it to the new score afterwards.
+            if let detail {
+                do {
+                    try await supabase.from("wod_results").update(DetailPayload(detail: detail)).eq("id", value: id).execute()
+                } catch where Self.missingDetailColumn(error) {
+                    let withRounds = Self.noteWithRounds(note, detail)
+                    if withRounds != note {
+                        try? await supabase.from("wod_results").update(NotePayload(note: String(withRounds.prefix(500)))).eq("id", value: id).execute()
+                    }
+                } catch {
+                    // The score is saved; only the round detail is missing.
+                }
+            }
         } catch {
             if "\(error)".contains("log_benchmark") || "\(error)".contains("PGRST202") {
                 throw BenchmarkError.needsMigration
@@ -168,6 +207,15 @@ private nonisolated struct NewResult: Encodable, Sendable {
     let performed_on: String
     let note: String?
     let entered_by_email: String?
+    let detail: WodDetail?    // left out of the JSON when nil, so older databases still accept it
+}
+
+private nonisolated struct DetailPayload: Encodable, Sendable {
+    let detail: WodDetail
+}
+
+private nonisolated struct NotePayload: Encodable, Sendable {
+    let note: String
 }
 
 private nonisolated struct BenchmarkParams: Encodable, Sendable {

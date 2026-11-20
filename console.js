@@ -712,7 +712,7 @@
       for (const r of all) {
         const k = "del-result-" + r.id;
         html += `<tr class="${r.hidden ? "inactive" : ""}"><td data-l="Athlete">${esc(nameOf(r.athlete_email))}</td><td data-l="Score"><b>${esc(W.format(w.score_type, r.score))}</b></td><td data-l="Rx">${r.rx ? "Rx" : "Scaled"}</td>
-          <td data-l="Date">${esc(fmtDate(r.performed_on))}</td><td data-l="Note">${esc(r.note || "")}</td><td data-l="Entered by">${esc(nameOf(r.entered_by_email))}</td>
+          <td data-l="Date">${esc(fmtDate(r.performed_on))}</td><td data-l="Note">${esc(r.note || "")}${r.detail && Array.isArray(r.detail.rounds) && r.detail.rounds.some((x) => x.time != null) ? `<div class="extra">Rounds: ${r.detail.rounds.filter((x) => x.time != null).map((x) => esc(W.format("time", x.time))).join(" · ")}</div>` : ""}</td><td data-l="Entered by">${esc(nameOf(r.entered_by_email))}</td>
           <td class="actions"><button class="btn" data-act="toggle-hidden" data-id="${esc(r.id)}">${r.hidden ? "Show" : "Hide"}</button>
           <button class="btn danger" data-act="del-result" data-id="${esc(r.id)}">${state.confirm === k ? "Tap again" : "Delete"}</button></td></tr>`;
       }

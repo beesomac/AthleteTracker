@@ -54,6 +54,9 @@ struct LeaderboardDetailView: View {
     @Environment(AppModel.self) private var model
     let wod: WodRow
     @State private var logging = false
+    @State private var timer: WodTimerItem?
+
+    private var plan: WodPlan { WodPlan.make(library: WodLibrary.find(wod.libraryId), board: wod) }
 
     var body: some View {
         List {
@@ -66,6 +69,16 @@ struct LeaderboardDetailView: View {
                 if let lib = WodLibrary.find(wod.libraryId) {
                     NavigationLink("Benchmark history") { BenchmarkDetailView(wod: lib) }
                 }
+                Button {
+                    timer = WodTimerItem(plan: plan)
+                } label: {
+                    Label("Start WOD", systemImage: "stopwatch")
+                }
+            }
+
+            let mine = model.history(for: wod).filter { $0.detail?.roundTimes.isEmpty == false }
+            if let last = mine.first, let d = last.detail {
+                Section("Your last rounds") { RoundTimesView(detail: d) }
             }
 
             Section("Leaderboard") {
@@ -89,10 +102,13 @@ struct LeaderboardDetailView: View {
             }
         }
         .sheet(isPresented: $logging) {
-            LogScoreSheet(title: wod.name, scoreType: wod.scoreType, timeCap: wod.timeCapSeconds) { score, rx, day, note in
-                try await model.logResult(on: wod, score: score, rx: rx, on: day, note: note)
+            LogScoreSheet(title: wod.name, scoreType: wod.scoreType, timeCap: wod.timeCapSeconds, plan: plan) { score, rx, day, note, detail in
+                try await model.logResult(on: wod, score: score, rx: rx, on: day, note: note, detail: detail)
             }
         }
+        .wodTimer($timer, log: wod.isOpen ? { score, rx, day, note, detail in
+            try await model.logResult(on: wod, score: score, rx: rx, on: day, note: note, detail: detail)
+        } : nil)
     }
 }
 

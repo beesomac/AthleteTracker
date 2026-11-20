@@ -99,11 +99,15 @@ nonisolated struct Block: Decodable, Sendable, Identifiable {
     var rounds: String?
     /// Free text shown above the block, e.g. the full write-up of a WOD from the console's library.
     var note: String?
+    /// A WOD from the console's library (wods.json id), and the leaderboard picked for it.
+    var wod: String?
+    var board: String?
     var exercises: [Exercise]
 
     var id: String { key + (name ?? "") }
+    var isWod: Bool { wod != nil || board != nil }
 
-    enum CodingKeys: String, CodingKey { case key, name, rounds, note, exercises }
+    enum CodingKeys: String, CodingKey { case key, name, rounds, note, wod, board, exercises }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -111,6 +115,8 @@ nonisolated struct Block: Decodable, Sendable, Identifiable {
         name = c.lossyString(.name)
         rounds = c.lossyString(.rounds)
         note = c.lossyString(.note)
+        wod = c.lossyString(.wod)
+        board = c.lossyString(.board)
         exercises = (try? c.decode([Exercise].self, forKey: .exercises)) ?? []
     }
 }
