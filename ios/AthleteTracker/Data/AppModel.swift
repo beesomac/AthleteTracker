@@ -60,6 +60,7 @@ final class AppModel {
     }
 
     func signOut() async {
+        await Push.shared.signingOut()
         try? await supabase.auth.signOut()
     }
 
@@ -112,6 +113,7 @@ final class AppModel {
                 athleteEmail = email
             }
             phase = .signedIn
+            Task { await Push.shared.signedInAsMember() }
             await reload()
         } catch {
             loadError = error.localizedDescription
