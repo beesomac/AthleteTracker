@@ -52,7 +52,7 @@ struct WodTimerView: View {
         .statusBarHidden(phase == .running || phase == .paused)
         .persistentSystemOverlays(.hidden)
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true; fillSetupFields() }
-        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false; OrientationLock.landscape(false) }
         .sensoryFeedback(.impact(weight: .heavy), trigger: splits.count)
         .task(id: phase) {
             // Beeps and the automatic stop; the clock itself redraws in a TimelineView.
@@ -122,6 +122,7 @@ struct WodTimerView: View {
         pausedTotal = 0
         pausedAt = nil
         phase = .running
+        OrientationLock.landscape(true)
     }
 
     private func togglePause() {
@@ -144,6 +145,7 @@ struct WodTimerView: View {
         // Finishing by hand ends the last round (or movement) too, unless you just split.
         if !hitLimit && x > 0.5 && (splits.last.map { x - $0 > 3 } ?? true) { splits.append(elapsed) }
         phase = .done
+        OrientationLock.landscape(false)
         AudioServicesPlaySystemSound(1052)
     }
 
@@ -242,52 +244,90 @@ struct WodTimerView: View {
     // MARK: Running
 
     private var running: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(plan.title).font(.headline).lineLimit(1)
-                Spacer()
-                Button { finish(hitLimit: false) } label: {
-                    Image(systemName: "xmark").font(.headline).frame(width: 36, height: 36)
-                }
-                .buttonStyle(.bordered).clipShape(Circle())
-                .accessibilityLabel("Stop timer")
-            }
-            .padding(.horizontal, 20).padding(.top, 8)
-
+        GeometryReader { (geo: GeometryProxy) in
             TimelineView(.animation(minimumInterval: 0.1, paused: phase != .running)) { ctx in
-                face(t(ctx.date))
+                runningLayout(x: t(ctx.date), size: geo.size)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            HStack(spacing: 10) {
-                Button(phase == .paused ? "Resume" : "Pause") { togglePause() }
-                    .buttonStyle(TimerButtonStyle())
-                Button("Split") { split() }
-                    .buttonStyle(TimerButtonStyle())
-                Button("Finish") { finish(hitLimit: false) }
-                    .buttonStyle(TimerButtonStyle(prominent: true))
-            }
-            .padding(.horizontal, 20).padding(.bottom, 12)
         }
+        .padding(.horizontal, 16).padding(.vertical, 8)
         .background(Color.orange.opacity(flash ? 0.35 : 0).ignoresSafeArea())
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { split() }
         .accessibilityAction(named: "Record split") { split() }
     }
 
+    /// Sideways: the clock fills the left, round and buttons on the right. Upright: stacked.
     @ViewBuilder
-    private func face(_ x: Double) -> some View {
-        VStack(spacing: 8) {
-            let texts = clockTexts(x)
-            Text(texts.label.uppercased()).font(.subheadline.weight(.semibold)).tracking(2)
-                .foregroundStyle(isRest ? .green : .secondary)
+    private func runningLayout(x: Double, size: CGSize) -> some View {
+        if size.width > size.height {
+            HStack(spacing: 16) {
+                clockFace(x: x, digitHeight: size.height * 0.62)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                sidePanel(x: x)
+                    .frame(width: max(200, size.width * 0.27))
+            }
+        } else {
+            VStack(spacing: 12) {
+                topBar
+                clockFace(x: x, digitHeight: size.width * 0.42)
+                    .frame(maxHeight: .infinity)
+                if x >= 0 { roundView(x) }
+                Text(lastSplitText(x)).font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
+                buttons(vertical: false)
+            }
+        }
+    }
+
+    private var topBar: some View {
+        HStack {
+            Text(plan.title).font(.headline).lineLimit(1)
+            Spacer()
+            Button { finish(hitLimit: false) } label: {
+                Image(systemName: "xmark").font(.headline).frame(width: 36, height: 36)
+            }
+            .buttonStyle(.bordered).clipShape(Circle())
+            .accessibilityLabel("Stop timer")
+        }
+    }
+
+    /// Big LED-style digits, like a gym clock.
+    private func clockFace(x: Double, digitHeight: CGFloat) -> some View {
+        let texts = clockTexts(x)
+        let ledColor: Color = isRest ? Color(red: 0.3, green: 0.95, blue: 0.5) : Color(red: 1.0, green: 0.23, blue: 0.16)
+        return VStack(spacing: 4) {
+            Text(texts.label.uppercased())
+                .font(.headline.weight(.semibold)).tracking(3)
+                .foregroundStyle(isRest ? Color.green : Color.secondary)
             Text(texts.big)
-                .font(.system(size: 160, weight: .bold, design: .rounded).monospacedDigit())
-                .minimumScaleFactor(0.3).lineLimit(1)
-                .padding(.horizontal, 12)
+                .font(.custom("DBLCDTempBlack", size: digitHeight))
+                .monospacedDigit()
+                .foregroundStyle(ledColor)
+                .shadow(color: ledColor.opacity(0.55), radius: 12)
+                .minimumScaleFactor(0.2)
+                .lineLimit(1)
             Text(texts.sub).font(.title3.monospacedDigit()).foregroundStyle(.secondary)
-            if x >= 0 { roundView(x).padding(.top, 14) }
-            Text(lastSplitText(x)).font(.subheadline.monospacedDigit()).foregroundStyle(.secondary).padding(.top, 14)
+        }
+    }
+
+    private func sidePanel(x: Double) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            topBar
+            if x >= 0 { roundView(x).frame(maxWidth: .infinity) }
+            Spacer(minLength: 0)
+            Text(lastSplitText(x)).font(.footnote.monospacedDigit()).foregroundStyle(.secondary)
+            buttons(vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private func buttons(vertical: Bool) -> some View {
+        let pause = Button(phase == .paused ? "Resume" : "Pause") { togglePause() }.buttonStyle(TimerButtonStyle())
+        let splitButton = Button("Split") { split() }.buttonStyle(TimerButtonStyle())
+        let finishButton = Button("Finish") { finish(hitLimit: false) }.buttonStyle(TimerButtonStyle(prominent: true))
+        if vertical {
+            VStack(spacing: 8) { HStack(spacing: 8) { pause; splitButton }; finishButton }
+        } else {
+            HStack(spacing: 10) { pause; splitButton; finishButton }
         }
     }
 
@@ -340,44 +380,49 @@ struct WodTimerView: View {
 
     private func setsList(_ sets: [WodSet], current: Int) -> some View {
         VStack(spacing: 4) {
-            ForEach(Array(sets.enumerated()), id: \.offset) { i, s in
-                HStack(spacing: 6) {
-                    Text(s.target).font(.title3.bold())
-                        .foregroundStyle(i == current ? .orange : .primary)
-                    Text(s.name).font(.title3)
-                }
-                .opacity(current >= 0 && i < current ? 0.4 : 1)
-                .strikethrough(current >= 0 && i < current)
+            ForEach(sets.indices, id: \.self) { (i: Int) in
+                TimerSetLine(set: sets[i], isCurrent: i == current, isDone: current >= 0 && i < current)
             }
         }
     }
 
     // MARK: Done
 
+    private var doneSubtitle: String {
+        "\(spec.label) · \(splits.count) split\(splits.count == 1 ? "" : "s")"
+    }
+
+    /// Rounds with a time (or a timed movement), for the summary after Finish.
+    private var timedRounds: [TimedRound] {
+        let mapped: WodPlan.Mapped = plan.map(splits: splits, by: by)
+        var out: [TimedRound] = []
+        for (i, r) in mapped.rounds.enumerated() {
+            let setTimes: [String] = r.sets.compactMap { s in
+                guard let t = s.time else { return nil }
+                return "\(s.set.name) \(WodClock.text(t, tenths: true))"
+            }
+            guard r.time != nil || !setTimes.isEmpty else { continue }
+            out.append(TimedRound(
+                id: i,
+                time: r.time.map { WodClock.text($0, tenths: true) } ?? "–",
+                movements: by == .set ? setTimes.joined(separator: " · ") : ""
+            ))
+        }
+        return out
+    }
+
     private var done: some View {
-        let mapped = plan.map(splits: splits, by: by)
-        let timed = mapped.rounds.enumerated().filter { $0.element.time != nil || $0.element.sets.contains { $0.time != nil } }
+        let timed: [TimedRound] = timedRounds
         return ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 Text(plan.title).font(.system(size: 34, weight: .bold, design: .rounded))
                 Text(hitLimit && spec.mode == .down ? "Time's up" : WodClock.text(elapsed, tenths: true))
                     .font(.system(size: 72, weight: .bold, design: .rounded).monospacedDigit())
-                Text("\(spec.label) · \(splits.count) split\(splits.count == 1 ? "" : "s")").foregroundStyle(.secondary)
+                Text(doneSubtitle).foregroundStyle(.secondary)
                 if !timed.isEmpty {
                     VStack(spacing: 8) {
-                        ForEach(timed, id: \.offset) { i, r in
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack {
-                                    Text("Round \(i + 1)")
-                                    Spacer()
-                                    Text(r.time.map { WodClock.text($0, tenths: true) } ?? "–").bold().monospacedDigit()
-                                }
-                                if by == .set {
-                                    Text(r.sets.compactMap { s in s.time.map { "\(s.set.name) \(WodClock.text($0, tenths: true))" } }.joined(separator: " · "))
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                            Divider()
+                        ForEach(timed) { (r: TimedRound) in
+                            TimedRoundRow(round: r)
                         }
                     }
                 }
@@ -437,7 +482,7 @@ extension View {
     /// with the time, rounds and splits filled in. `log` is nil when there's nowhere to log.
     func wodTimer(
         _ item: Binding<WodTimerItem?>,
-        log: ((Double, Bool, Date, String, WodDetail?) async throws -> Void)?
+        log: ScoreSaver?
     ) -> some View {
         modifier(WodTimerHost(item: item, log: log))
     }
@@ -445,7 +490,7 @@ extension View {
 
 private struct WodTimerHost: ViewModifier {
     @Binding var item: WodTimerItem?
-    let log: ((Double, Bool, Date, String, WodDetail?) async throws -> Void)?
+    let log: ScoreSaver?
     @State private var queued: (WodPlan, TimerResult)?
     @State private var scoring: ScoreItem?
 
@@ -476,19 +521,81 @@ struct RoundTimesView: View {
     let detail: WodDetail
 
     var body: some View {
-        ForEach(Array(detail.rounds.enumerated()), id: \.offset) { i, r in
-            VStack(alignment: .leading, spacing: 2) {
-                HStack {
-                    Text("Round \(i + 1)")
-                    Spacer()
-                    Text(r.time.map { WodClock.text($0, tenths: true) } ?? "–").monospacedDigit()
-                }
-                let changed = r.sets.filter { $0.actual != nil }
-                if !changed.isEmpty {
-                    Text(changed.map { "\($0.name): \($0.actual!)" }.joined(separator: " · "))
-                        .font(.caption).foregroundStyle(.secondary)
-                }
+        ForEach(detail.rounds.indices, id: \.self) { (i: Int) in
+            SavedRoundRow(index: i, round: detail.rounds[i])
+        }
+    }
+}
+
+struct SavedRoundRow: View {
+    let index: Int
+    let round: WodDetail.Round
+
+    private var timeText: String {
+        guard let t = round.time else { return "–" }
+        return WodClock.text(t, tenths: true)
+    }
+
+    private var changes: String {
+        let bits: [String] = round.sets.compactMap { s in
+            guard let a = s.actual else { return nil }
+            return "\(s.name): \(a)"
+        }
+        return bits.joined(separator: " · ")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text("Round \(index + 1)")
+                Spacer()
+                Text(timeText).monospacedDigit()
             }
+            if !changes.isEmpty {
+                Text(changes).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+/// One movement on the running timer: reps in bold, then the name.
+struct TimerSetLine: View {
+    let set: WodSet
+    let isCurrent: Bool
+    let isDone: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(set.target).font(.title3.bold())
+                .foregroundStyle(isCurrent ? Color.orange : Color.primary)
+            Text(set.name).font(.title3)
+        }
+        .opacity(isDone ? 0.4 : 1)
+        .strikethrough(isDone)
+    }
+}
+
+/// One line of the timer's summary.
+struct TimedRound: Identifiable {
+    let id: Int
+    let time: String
+    let movements: String
+}
+
+struct TimedRoundRow: View {
+    let round: TimedRound
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text("Round \(round.id + 1)")
+                Spacer()
+                Text(round.time).bold().monospacedDigit()
+            }
+            if !round.movements.isEmpty {
+                Text(round.movements).font(.caption).foregroundStyle(.secondary)
+            }
+            Divider()
         }
     }
 }

@@ -3,6 +3,9 @@ import Foundation
 // WOD rounds, the WOD timer's settings, and the round detail saved with a score.
 // Same rules as the website's wodtimer.js; the detail is wod_results.detail (supabase/011).
 
+/// Saves a WOD score: score, Rx, date, note, and the round detail.
+typealias ScoreSaver = (Double, Bool, Date, String, WodDetail?) async throws -> Void
+
 /// One movement in a round, e.g. Wall Walk "3 reps".
 nonisolated struct WodSet: Codable, Sendable, Hashable {
     let name: String

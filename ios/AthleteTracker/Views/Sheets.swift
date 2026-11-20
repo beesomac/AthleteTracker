@@ -10,7 +10,7 @@ struct LogScoreSheet: View {
     var timeCap: Int? = nil
     var plan: WodPlan? = nil
     var prefill: TimerResult? = nil
-    let save: (Double, Bool, Date, String, WodDetail?) async throws -> Void
+    let save: ScoreSaver
 
     @State private var text = ""
     @State private var capped = false
@@ -75,40 +75,8 @@ struct LogScoreSheet: View {
                         Text("\(splits.count) split\(splits.count == 1 ? "" : "s") from the timer")
                     }
                 }
-                ForEach($rounds) { $round in
-                    let i = rounds.firstIndex { $0.id == round.id } ?? 0
-                    Section {
-                        ForEach($round.sets) { $set in
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(set.name)
-                                    Text([set.target, set.time.map { WodClock.text($0, tenths: true) }].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                TextField(placeholder(set.target), text: $set.actual)
-                                    .multilineTextAlignment(.trailing)
-                                    .frame(maxWidth: 110)
-                                    .accessibilityLabel("\(set.name), round \(i + 1), what you did")
-                            }
-                        }
-                    } header: {
-                        HStack {
-                            Text("Round \(i + 1)")
-                            Spacer()
-                            TextField("time", text: $round.time)
-                                .keyboardType(.numbersAndPunctuation)
-                                .multilineTextAlignment(.trailing)
-                                .font(.body.monospacedDigit())
-                                .frame(maxWidth: 100)
-                                .accessibilityLabel("Round \(i + 1) time")
-                        }
-                        .textCase(nil)
-                    } footer: {
-                        if i == rounds.count - 1 {
-                            Text("Round times are optional (mm:ss). Leave a movement blank if you did it as written.")
-                        }
-                    }
+                ForEach(roundIDs, id: \.self) { (id: UUID) in
+                    RoundEditorSection(index: index(of: id), isLast: id == roundIDs.last, round: binding(for: id))
                 }
                 if let plan, plan.repeats || plan.rounds.isEmpty, !rounds.isEmpty || plan.repeats {
                     Section {
@@ -138,9 +106,16 @@ struct LogScoreSheet: View {
         return "Didn't finish in the time cap"
     }
 
-    private func placeholder(_ target: String) -> String {
-        let first = target.split(whereSeparator: { " ,@".contains($0) }).first.map(String.init) ?? ""
-        return first.isEmpty ? "done" : first
+    private var roundIDs: [UUID] { rounds.map(\.id) }
+
+    private func index(of id: UUID) -> Int { rounds.firstIndex { $0.id == id } ?? 0 }
+
+    /// A binding to one round by id, safe if the list changes underneath it.
+    private func binding(for id: UUID) -> Binding<EditRound> {
+        Binding(
+            get: { rounds.first { $0.id == id } ?? EditRound(sets: []) },
+            set: { new in if let i = rounds.firstIndex(where: { $0.id == id }) { rounds[i] = new } }
+        )
     }
 
     private func setUp() {
@@ -224,6 +199,68 @@ struct LogScoreSheet: View {
                 self.error = error.localizedDescription
             }
             busy = false
+        }
+    }
+}
+
+/// One round on the score sheet: its time, and what was done for each movement.
+struct RoundEditorSection: View {
+    let index: Int
+    let isLast: Bool
+    @Binding var round: LogScoreSheet.EditRound
+
+    var body: some View {
+        Section {
+            ForEach($round.sets) { (set: Binding<LogScoreSheet.EditSet>) in
+                SetEditorRow(roundIndex: index, set: set)
+            }
+        } header: {
+            HStack {
+                Text("Round \(index + 1)")
+                Spacer()
+                TextField("time", text: $round.time)
+                    .keyboardType(.numbersAndPunctuation)
+                    .multilineTextAlignment(.trailing)
+                    .font(.body.monospacedDigit())
+                    .frame(maxWidth: 100)
+                    .accessibilityLabel("Round \(index + 1) time")
+            }
+            .textCase(nil)
+        } footer: {
+            if isLast {
+                Text("Round times are optional (mm:ss). Leave a movement blank if you did it as written.")
+            }
+        }
+    }
+}
+
+struct SetEditorRow: View {
+    let roundIndex: Int
+    @Binding var set: LogScoreSheet.EditSet
+
+    private var detailText: String {
+        var bits: [String] = []
+        if !set.target.isEmpty { bits.append(set.target) }
+        if let t = set.time { bits.append(WodClock.text(t, tenths: true)) }
+        return bits.joined(separator: " · ")
+    }
+
+    private var placeholder: String {
+        let first: String = set.target.split(whereSeparator: { " ,@".contains($0) }).first.map(String.init) ?? ""
+        return first.isEmpty ? "done" : first
+    }
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(set.name)
+                Text(detailText).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            TextField(placeholder, text: $set.actual)
+                .multilineTextAlignment(.trailing)
+                .frame(maxWidth: 110)
+                .accessibilityLabel("\(set.name), round \(roundIndex + 1), what you did")
         }
     }
 }
