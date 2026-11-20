@@ -1,6 +1,6 @@
 name: AthleteTracker
 options:
-  bundleIdPrefix: com.beesomac
+  bundleIdPrefix: com.blackstumpsoftware
   deploymentTarget:
     iOS: "18.0"
 packages:
@@ -29,7 +29,7 @@ targets:
         product: Supabase
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.beesomac.AthleteTracker
+        PRODUCT_BUNDLE_IDENTIFIER: com.blackstumpsoftware.TrainingLog
         CODE_SIGN_ENTITLEMENTS: AthleteTracker.entitlements
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES

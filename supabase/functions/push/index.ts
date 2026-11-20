@@ -9,7 +9,7 @@
 //   APNS_KEY_ID       10-character Key ID of the APNs key
 //   APNS_TEAM_ID      10-character Team ID of the paid developer team
 //   APNS_PRIVATE_KEY  the whole contents of the AuthKey_XXXXXXXXXX.p8 file
-//   APNS_BUNDLE_ID    optional, defaults to com.beesomac.AthleteTracker
+//   APNS_BUNDLE_ID    optional, defaults to com.blackstumpsoftware.TrainingLog
 // SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are provided by Supabase.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -17,7 +17,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 const KEY_ID = Deno.env.get("APNS_KEY_ID") ?? "";
 const TEAM_ID = Deno.env.get("APNS_TEAM_ID") ?? "";
 const PRIVATE_KEY = Deno.env.get("APNS_PRIVATE_KEY") ?? "";
-const BUNDLE_ID = Deno.env.get("APNS_BUNDLE_ID") ?? "com.beesomac.AthleteTracker";
+const BUNDLE_ID = Deno.env.get("APNS_BUNDLE_ID") ?? "com.blackstumpsoftware.TrainingLog";
 
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
   auth: { persistSession: false },

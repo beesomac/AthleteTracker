@@ -23,7 +23,7 @@ A trainer can switch athletes from the person menu, the same way as the website'
 
 To run on your own iPhone: select the **AthleteTracker** target → **Signing & Capabilities**,
 pick your Apple ID team, plug in the phone (or use Wi-Fi pairing) and choose it as the run
-destination. If the bundle id `com.beesomac.AthleteTracker` is taken, change it there.
+destination. If the bundle id `com.blackstumpsoftware.TrainingLog` is taken, change it there.
 
 ## Push notifications
 
