@@ -91,13 +91,14 @@ nonisolated struct LibraryWod: Decodable, Sendable, Identifiable, Hashable {
     let score: String          // score type: time | reps | load | rounds_reps
     let description: String?
     let movements: [Movement]
+    let cap: Int?              // time cap in seconds, for "for time" WODs
 
     nonisolated struct Movement: Decodable, Sendable, Hashable {
         let name: String
         let target: String?
     }
 
-    enum CodingKeys: String, CodingKey { case id, name, group, year, primary, format, score, description, movements }
+    enum CodingKeys: String, CodingKey { case id, name, group, year, primary, format, score, description, movements, cap }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -172,6 +173,24 @@ nonisolated enum WodScore {
     //   reps        → reps, higher wins
     //   load        → kg, higher wins
     //   rounds_reps → rounds * 1000 + reps
+    // A capped "for time" score (didn't finish in the cap) is "CAP + reps", stored as
+    // capBase * 2 - reps: above every real time, and more reps sorts lower (better).
+
+    static let capBase = 1_000_000.0
+
+    static func capped(reps: Int) -> Double { capBase * 2 - Double(min(max(reps, 0), Int(capBase) - 1)) }
+    static func isCapped(_ type: String, _ score: Double) -> Bool { type == "time" && score >= capBase }
+    static func cappedReps(_ score: Double) -> Int { Int((capBase * 2 - score).rounded()) }
+
+    /// Reps done at the cap, typed as "45", "cap 45" or "CAP+45" → stored score.
+    static func parseCapped(_ text: String) -> Double? {
+        var s = text.filter { !$0.isWhitespace }.lowercased()
+        if s.hasPrefix("cap") { s.removeFirst(3) }
+        if s.hasPrefix("+") { s.removeFirst() }
+        if s.hasSuffix("reps") { s.removeLast(4) } else if s.hasSuffix("rep") { s.removeLast(3) }
+        guard !s.isEmpty, s.allSatisfy(\.isNumber), let n = Int(s), Double(n) < capBase else { return nil }
+        return capped(reps: n)
+    }
 
     static func label(_ type: String) -> String {
         switch type {
@@ -196,7 +215,10 @@ nonisolated enum WodScore {
     static func lowerWins(_ type: String) -> Bool { type == "time" }
 
     /// Text typed by a person → the stored number, or nil if it doesn't make sense.
-    static func parse(_ type: String, _ text: String) -> Double? {
+    static func parse(_ type: String, _ text: String, capped isCap: Bool = false) -> Double? {
+        if type == "time" && (isCap || text.trimmingCharacters(in: .whitespaces).lowercased().hasPrefix("cap")) {
+            return parseCapped(text)
+        }
         let s = text.filter { !$0.isWhitespace }
         guard !s.isEmpty else { return nil }
         switch type {
@@ -229,6 +251,7 @@ nonisolated enum WodScore {
     static func format(_ type: String, _ score: Double) -> String {
         switch type {
         case "time":
+            if score >= capBase { return "CAP + \(cappedReps(score)) reps" }
             let whole = Int(score), frac = Int(((score - Double(whole)) * 10).rounded())
             let h = whole / 3600, m = (whole % 3600) / 60, sec = whole % 60
             let ss = String(sec).leftPad(2) + (frac > 0 ? ".\(frac)" : "")

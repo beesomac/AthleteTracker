@@ -89,7 +89,7 @@ struct LeaderboardDetailView: View {
             }
         }
         .sheet(isPresented: $logging) {
-            LogScoreSheet(title: wod.name, scoreType: wod.scoreType) { score, rx, day, note in
+            LogScoreSheet(title: wod.name, scoreType: wod.scoreType, timeCap: wod.timeCapSeconds) { score, rx, day, note in
                 try await model.logResult(on: wod, score: score, rx: rx, on: day, note: note)
             }
         }

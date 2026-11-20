@@ -654,7 +654,8 @@
         ${w.description ? `<div class="cue wod-desc">${esc(w.description)}</div>` : ""}
         ${rows.length ? `<ol class="ranks">${rows.map((r) => `<li class="${r.is_me ? "me" : ""}"><span class="rank">${r.rank}</span><span class="who">${esc(r.athlete_name)}${r.is_me ? " (you)" : ""}${r.rx ? "" : ` <span class="chip swap">Scaled</span>`}</span><span class="score">${esc(W.format(w.score_type, r.score))}</span></li>`).join("")}</ol>` : `<div class="extra">No scores yet.</div>`}
         ${state.openScore === w.id ? `<form class="score-form" data-wod="${esc(w.id)}" data-type="${esc(w.score_type)}">
-          <label>Score (${esc(t.hint)})<input id="score-text" type="text" inputmode="${w.score_type === "time" || w.score_type === "rounds_reps" ? "text" : "decimal"}" required autocomplete="off"></label>
+          ${w.score_type === "time" ? `<label class="check"><input id="score-capped" type="checkbox"> Didn't finish in the time cap${w.time_cap_seconds ? ` (${esc(W.format("time", w.time_cap_seconds))})` : ""}</label>` : ""}
+          <label><span id="score-label">Score (${esc(t.hint)})</span><input id="score-text" type="text" inputmode="${w.score_type === "time" || w.score_type === "rounds_reps" ? "text" : "decimal"}" required autocomplete="off"></label>
           <label>Date<input id="score-on" type="date" value="${esc(localDay(new Date().toISOString()))}"></label>
           <label class="check"><input id="score-rx" type="checkbox" checked> Rx (as written)</label>
           <label>Note<input id="score-note" type="text" maxlength="500" placeholder="Optional, e.g. scaled to 30 kg"></label>
@@ -734,6 +735,14 @@
     if (s) for (const b of s.blocks) for (const ex of b.exercises) if (ex.id === eid) return ex;
     return null;
   }
+  // "Didn't finish in the time cap": the score box takes reps done instead of a time.
+  app.addEventListener("change", (ev) => {
+    if (ev.target.id !== "score-capped") return;
+    const cap = ev.target.checked, inp = $("#score-text");
+    $("#score-label").textContent = cap ? "Reps done at the cap (scores CAP + reps)" : `Score (${W.TYPES.time.hint})`;
+    inp.inputMode = cap ? "numeric" : "text"; inp.placeholder = cap ? "e.g. 45" : ""; inp.focus();
+  });
+
   // Typing a weight saves it and ticks the set.
   app.addEventListener("change", async (ev) => {
     const el = ev.target;
@@ -793,8 +802,9 @@
     if (ev.target.classList.contains("score-form")) {
       ev.preventDefault();
       const f = ev.target;
-      const score = W.parse(f.dataset.type, $("#score-text").value);
-      if (score == null) { flash("That score doesn't look right. Use " + W.TYPES[f.dataset.type].hint + "."); return; }
+      const cap = !!($("#score-capped") && $("#score-capped").checked);
+      const score = W.parse(f.dataset.type, $("#score-text").value, cap);
+      if (score == null) { flash(cap ? "Enter the total reps you finished before the cap, e.g. 45." : "That score doesn't look right. Use " + W.TYPES[f.dataset.type].hint + (f.dataset.type === "time" ? ", or tick \"Didn't finish\" for CAP + reps." : ".")); return; }
       const btn = f.querySelector('[type="submit"]'); btn.disabled = true;
       try {
         await store.addResult({ wod: f.dataset.wod, score, rx: $("#score-rx").checked, on: $("#score-on").value, note: $("#score-note").value.trim() });

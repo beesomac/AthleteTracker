@@ -197,6 +197,7 @@ label.file input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .ask-hist{font-size:13px;background:var(--info-soft);color:var(--info);border-radius:8px;padding:6px 9px;display:grid;gap:2px}
 .modal .row{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
 .wod-info{font-size:12.5px}
+.wod-info .btn{padding:1px 8px;font-size:12px;margin-left:6px;min-height:0}
 .board-members{margin:8px 0}
 .board-members .chip{display:inline-flex;align-items:center;gap:4px}
 .board-members .x{border:0;background:none;color:inherit;cursor:pointer;font-size:11px;padding:0 2px}

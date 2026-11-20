@@ -5,29 +5,38 @@ struct LogScoreSheet: View {
     @Environment(\.dismiss) private var dismiss
     let title: String
     let scoreType: String
+    var timeCap: Int? = nil
     let save: (Double, Bool, Date, String) async throws -> Void
 
     @State private var text = ""
+    @State private var capped = false
     @State private var rx = true
     @State private var day = Date.now
     @State private var note = ""
     @State private var busy = false
     @State private var error: String?
 
-    private var score: Double? { WodScore.parse(scoreType, text) }
+    private var score: Double? { WodScore.parse(scoreType, text, capped: capped) }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    TextField(WodScore.hint(scoreType), text: $text)
-                        .keyboardType(scoreType == "load" ? .decimalPad : .numbersAndPunctuation)
+                    if scoreType == "time" {
+                        Toggle(capLabel, isOn: $capped)
+                    }
+                    TextField(capped ? "Reps done at the cap" : WodScore.hint(scoreType), text: $text)
+                        .keyboardType(capped ? .numberPad : scoreType == "load" ? .decimalPad : .numbersAndPunctuation)
                         .font(.title2.monospacedDigit())
                     if let score {
                         Text(WodScore.format(scoreType, score)).foregroundStyle(.secondary)
                     }
                 } header: {
                     Text(WodScore.label(scoreType))
+                } footer: {
+                    if capped {
+                        Text("Total reps finished before time ran out. Scores CAP + reps, ranked below everyone who finished.")
+                    }
                 }
                 Section {
                     Toggle("Rx", isOn: $rx)
@@ -48,6 +57,11 @@ struct LogScoreSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    private var capLabel: String {
+        if let timeCap, timeCap > 0 { return "Didn't finish in the cap (\(WodScore.format("time", Double(timeCap))))" }
+        return "Didn't finish in the time cap"
     }
 
     private func submit() {
