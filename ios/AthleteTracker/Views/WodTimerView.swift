@@ -442,7 +442,7 @@ extension View {
     /// with the time, rounds and splits filled in. `log` is nil when there's nowhere to log.
     func wodTimer(
         _ item: Binding<WodTimerItem?>,
-        log: ((Double, Bool, Date, String, WodDetail?) async throws -> Void)?
+        log: ScoreSaver?
     ) -> some View {
         modifier(WodTimerHost(item: item, log: log))
     }
@@ -450,7 +450,7 @@ extension View {
 
 private struct WodTimerHost: ViewModifier {
     @Binding var item: WodTimerItem?
-    let log: ((Double, Bool, Date, String, WodDetail?) async throws -> Void)?
+    let log: ScoreSaver?
     @State private var queued: (WodPlan, TimerResult)?
     @State private var scoring: ScoreItem?
 

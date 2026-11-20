@@ -75,13 +75,25 @@ struct LeaderboardDetailView: View {
             }
         }
         .sheet(isPresented: $logging) {
-            LogScoreSheet(title: wod.name, scoreType: wod.scoreType, timeCap: wod.timeCapSeconds, plan: plan, save: logScore)
+            LogScoreSheet(title: wod.name, scoreType: wod.scoreType, timeCap: wod.timeCapSeconds, plan: plan, save: saver)
         }
-        .wodTimer($timer, log: wod.isOpen ? logScore : nil)
+        .wodTimer($timer, log: openSaver)
     }
 
-    private func logScore(_ score: Double, _ rx: Bool, _ day: Date, _ note: String, _ detail: WodDetail?) async throws {
-        try await model.logResult(on: wod, score: score, rx: rx, on: day, note: note, detail: detail)
+    /// Saves a score on this board.
+    private var saver: ScoreSaver {
+        let model: AppModel = self.model
+        let wod: WodRow = self.wod
+        let save: ScoreSaver = { score, rx, day, note, detail in
+            try await model.logResult(on: wod, score: score, rx: rx, on: day, note: note, detail: detail)
+        }
+        return save
+    }
+
+    /// The saver, only while the board is open.
+    private var openSaver: ScoreSaver? {
+        if wod.isOpen { return saver }
+        return nil
     }
 
     @ViewBuilder private var infoSection: some View {

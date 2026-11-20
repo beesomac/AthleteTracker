@@ -10,7 +10,7 @@ struct LogScoreSheet: View {
     var timeCap: Int? = nil
     var plan: WodPlan? = nil
     var prefill: TimerResult? = nil
-    let save: (Double, Bool, Date, String, WodDetail?) async throws -> Void
+    let save: ScoreSaver
 
     @State private var text = ""
     @State private var capped = false

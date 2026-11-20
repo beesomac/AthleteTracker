@@ -86,7 +86,7 @@ struct SessionDetailView: View {
 
     /// Where a score from the timer goes: the block's open board, or the benchmark (which opens a
     /// board). nil when there's nowhere to log it (the timer then just shows the splits).
-    private func logger(for block: Block?) -> ((Double, Bool, Date, String, WodDetail?) async throws -> Void)? {
+    private func logger(for block: Block?) -> ScoreSaver? {
         guard let block else { return nil }
         if let b = board(for: block) {
             guard b.isOpen else { return nil }
