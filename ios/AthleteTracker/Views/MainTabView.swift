@@ -17,6 +17,15 @@ struct MainTabView: View {
                 BenchmarksView()
             }
         }
+        .onAppear(perform: openFromPush)
+        .onChange(of: Push.shared.openedKind) { openFromPush() }
+    }
+
+    /// A tapped push: scores and board invites open Leaderboards, "done this before" opens Program.
+    private func openFromPush() {
+        guard let kind = Push.shared.openedKind else { return }
+        Push.shared.openedKind = nil
+        tab = kind == "wod_again" ? .program : .leaderboards
     }
 }
 
