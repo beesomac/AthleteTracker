@@ -3,6 +3,9 @@
 //   reps        → reps, higher wins           ("150")
 //   load        → kg, higher wins             ("102.5")
 //   rounds_reps → rounds * 1000 + reps        ("5+12", "5 + 12" or "5")
+// Time-capped "for time" WODs: someone who doesn't finish scores "CAP + reps done". That is stored
+// as CAP_BASE * 2 - reps (always above any real time, and more reps = lower = better), so the
+// database, wod_board() and old app versions all keep sorting it below every finisher, by reps.
 (function () {
   const TYPES = {
     time: { label: "For time", unit: "", hint: "mm:ss", lowerWins: true },
@@ -11,8 +14,22 @@
     rounds_reps: { label: "AMRAP", unit: "", hint: "rounds+reps, e.g. 5+12", lowerWins: false },
   };
 
+  const CAP_BASE = 1000000;
+  const capped = (reps) => CAP_BASE * 2 - Math.max(0, Math.min(CAP_BASE - 1, Math.round(+reps || 0)));
+  const isCapped = (type, score) => type === "time" && +score >= CAP_BASE;
+  const cappedReps = (score) => CAP_BASE * 2 - Math.round(+score);
+
+  // Reps done at the cap, typed as "45", "cap 45" or "CAP+45" → stored score, or null.
+  function parseCapped(text) {
+    const s = String(text ?? "").trim().replace(/\s+/g, "").replace(/^cap\+?/i, "").replace(/reps?$/i, "");
+    if (!/^\d+$/.test(s) || +s >= CAP_BASE) return null;
+    return capped(+s);
+  }
+
   // Text typed by a person → the stored number, or null if it doesn't make sense.
-  function parse(type, text) {
+  // capped: the "didn't finish in the time cap" box was ticked, so text is the reps done.
+  function parse(type, text, isCap) {
+    if (type === "time" && (isCap || /^\s*cap/i.test(String(text ?? "")))) return parseCapped(text);
     const s = String(text ?? "").trim().replace(/\s+/g, "");
     if (!s) return null;
     if (type === "time") {
@@ -39,6 +56,7 @@
     if (score == null || score === "") return "";
     const n = +score;
     if (type === "time") {
+      if (n >= CAP_BASE) return `CAP + ${cappedReps(n)} reps`;
       const whole = Math.floor(n), frac = Math.round((n - whole) * 10);
       const h = Math.floor(whole / 3600), m = Math.floor((whole % 3600) / 60), sec = whole % 60;
       const ss = String(sec).padStart(2, "0") + (frac ? "." + frac : "");
@@ -72,5 +90,5 @@
     return rank(type, Object.values(best));
   }
 
-  window.WodScore = { TYPES, parse, format, rank, bestPerAthlete };
+  window.WodScore = { TYPES, parse, format, rank, bestPerAthlete, capped, isCapped, cappedReps };
 })();

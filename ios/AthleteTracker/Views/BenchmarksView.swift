@@ -166,7 +166,7 @@ struct BenchmarkDetailView: View {
             }
         }
         .sheet(isPresented: $logging) {
-            LogScoreSheet(title: wod.name, scoreType: wod.score) { score, rx, day, note in
+            LogScoreSheet(title: wod.name, scoreType: wod.score, timeCap: wod.cap) { score, rx, day, note in
                 try await model.logBenchmark(wod, score: score, rx: rx, on: day, note: note)
             }
         }

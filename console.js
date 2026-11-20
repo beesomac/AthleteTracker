@@ -409,7 +409,9 @@
     if (!state.edit) return "";
     const parts = [];
     const board = b.board && state.wods.find((w) => w.id === b.board);
-    parts.push(board ? `Leaderboard: <a href="#board-${esc(board.id)}">${esc(board.name)}</a>` : b.board === null ? "No leaderboard" : "You'll be asked about a leaderboard when you save");
+    const bi = state.edit.body.blocks.indexOf(b);
+    parts.push((board ? `Leaderboard: <a href="#board-${esc(board.id)}">${esc(board.name)}</a>` : b.board === null ? "No leaderboard" : "You'll be asked about a leaderboard when you save")
+      + (bi >= 0 && "board" in b ? ` <button type="button" class="btn" data-act="board-change" data-bi="${bi}">Change</button>` : ""));
     for (const email of state.edit.athlete ? [state.edit.athlete] : []) {
       const h = historyFor(email, b.wod, b.name);
       parts.push(h.length ? `<b>${esc(nameOf(email))} has done this before.</b> ${esc(historyLine(h))}` : `First time for ${esc(nameOf(email))}`);
@@ -431,11 +433,44 @@
   });
 
   // ─── "Add to leaderboard?" ─────────────────────────────────────────────────────────────
+  // The board already picked for this athlete and WOD: the newest other program of theirs whose
+  // block for this WOD points at a board that's still open, else an open board they're on.
+  function rememberedBoard(email, b) {
+    if (!email) return null;
+    const open = (id) => state.wods.some((w) => w.id === id && w.status === "open");
+    const same = (x) => x && x.board && open(x.board) && ((b.wod && x.wod === b.wod) || (!b.wod && String(x.name || "").trim().toLowerCase() === String(b.name || "").trim().toLowerCase()));
+    const progs = state.programs.filter((p) => p.athlete_email === email && p.id !== (state.edit && state.edit.id) && p.body && Array.isArray(p.body.blocks))
+      .sort((x, y) => String(y.date).localeCompare(String(x.date)));
+    for (const p of progs) { const hit = p.body.blocks.find(same); if (hit) return hit.board; }
+    const boards = boardsFor(b.wod, b.name).filter((w) => w.status === "open");
+    const mine = (state.boardMembers || []).filter((m) => m.athlete_email === email);
+    const on = boards.filter((w) => mine.some((m) => m.wod_id === w.id)).sort((x, y) => String(y.created_at).localeCompare(String(x.created_at)));
+    return on.length ? on[0].id : null;
+  }
   function openBoardAsk(blockIdx, athleteEmail, opts = {}) {
     const body = state.edit.body;
+    const athletes = programAthletes(athleteEmail);
+    // One athlete with a board already picked for this WOD: use it without asking ("Change" re-asks).
+    if (!opts.force && athletes.length === 1) {
+      const set = [];
+      blockIdx = blockIdx.filter((bi) => {
+        const b = bi >= 0 && body.blocks[bi], id = b && rememberedBoard(athletes[0], b);
+        if (!id) return true;
+        b.board = id; set.push(b); return false;
+      });
+      if (set.length) {
+        state.edit.text = JSON.stringify(body, null, 1);
+        const w = state.wods.find((x) => x.id === set[0].board);
+        flash(`${set[0].name || "WOD"}: on the ${w ? w.name : "same"} leaderboard as last time. Use Change under the WOD to pick another.`, "ok");
+      }
+      if (!blockIdx.filter((i) => i >= 0).length) {
+        if (opts.onSave !== false) { const f = $("#program-form"); if (f) f.requestSubmit(); } else renderBuilder();
+        return;
+      }
+    }
     state.boardAsk = {
       onSave: opts.onSave !== false,
-      athletes: programAthletes(athleteEmail),
+      athletes,
       items: blockIdx.filter((i) => i >= 0).map((bi) => {
         const b = body.blocks[bi], boards = boardsFor(b.wod, b.name).filter((w) => w.status !== "closed");
         return { bi, choice: boards.length ? boards[0].id : "new" };
@@ -658,6 +693,7 @@
       <form class="inline-form" id="result-add" data-wod="${esc(w.id)}" data-type="${esc(w.score_type)}">
         <label>Athlete<select name="athlete" required>${athleteOptions("", { none: true })}</select></label>
         <label>Score<input name="score" required placeholder="${esc(t.hint)}" autocomplete="off"></label>
+        ${w.score_type === "time" ? `<label class="check"><input type="checkbox" name="capped" data-hint="${esc(t.hint)}"> Didn't finish in the cap${w.time_cap_seconds ? ` (${esc(W.format("time", w.time_cap_seconds))})` : ""}: score is reps done</label>` : ""}
         <label>Date<input name="on" type="date" value="${esc(w.wod_date || today())}"></label>
         <label class="check"><input type="checkbox" name="rx" checked> Rx</label>
         <label class="full">Note<input name="note" maxlength="500" placeholder="Optional"></label>
@@ -798,9 +834,10 @@
           await run(sb.from("wods").update(row).eq("id", f.dataset.id), "Saved.");
         }
       } else if (f.id === "result-add") {
-        const score = W.parse(f.dataset.type, val(f, "score"));
+        const cap = !!(f.elements.capped && f.elements.capped.checked);
+        const score = W.parse(f.dataset.type, val(f, "score"), cap);
         if (!val(f, "athlete")) { flash("Choose an athlete."); return; }
-        if (score == null) { flash("That score doesn't look right. Use " + W.TYPES[f.dataset.type].hint + "."); return; }
+        if (score == null) { flash(cap ? "Enter the total reps done before the cap, e.g. 45." : "That score doesn't look right. Use " + W.TYPES[f.dataset.type].hint + (f.dataset.type === "time" ? ", or tick \"Didn't finish\" for CAP + reps." : ".")); return; }
         await run(sb.from("wod_results").insert({ wod_id: f.dataset.wod, athlete_email: val(f, "athlete"), score, rx: checked(f, "rx"), performed_on: val(f, "on") || undefined, note: val(f, "note") || null, entered_by_email: state.me }), "Score added.");
       }
     } finally { if (btn && document.contains(btn)) btn.disabled = false; }
@@ -843,6 +880,7 @@
     const el = ev.target;
     if (el.dataset.ask != null && state.boardAsk) { state.boardAsk.items[Number(el.dataset.ask)].choice = el.value; return; }
     if (el.id === "reorder-renumber" && state.reorder) { state.reorder.renumber = el.checked; return; }
+    if (el.name === "capped" && el.form && el.form.id === "result-add") { el.form.elements.score.placeholder = el.checked ? "reps done, e.g. 45" : el.dataset.hint; return; }
     if (el.classList.contains("filter-athlete")) { state.athleteFilter = el.value; render(); return; }
     if (el.id === "program-file" && el.files && el.files[0]) {
       const text = await el.files[0].text();
@@ -902,6 +940,7 @@
       await run(sb.from("notes").update({ reviewed: !n.reviewed, reviewed_by_email: n.reviewed ? null : state.me }).eq("id", id));
     } else if (act === "reply") { state.reply = id || null; render(); const t = $(".reply-form textarea"); if (t) t.focus(); }
     else if (act === "ask-cancel") { state.boardAsk = null; render(); }
+    else if (act === "board-change" && state.edit) { openBoardAsk([Number(btn.dataset.bi)], state.edit.athlete || null, { onSave: false, force: true }); }
     else if (act === "ask-confirm") { btn.disabled = true; await confirmBoardAsk(); }
     else if (act === "board-add-member") {
       const sel = $("#board-member-pick"); if (!sel || !sel.value) return;
