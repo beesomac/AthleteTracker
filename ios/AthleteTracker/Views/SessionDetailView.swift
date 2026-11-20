@@ -39,10 +39,7 @@ struct SessionDetailView: View {
                         Text(note).font(.callout).foregroundStyle(.secondary)
                     }
                     if block.isWod {
-                        Button {
-                            timerBlock = block
-                            timer = WodTimerItem(plan: WodPlan.make(library: WodLibrary.find(block.wod), block: block, board: board(for: block)))
-                        } label: {
+                        Button { startWod(block) } label: {
                             Label("Start WOD", systemImage: "stopwatch")
                         }
                     }
@@ -71,6 +68,13 @@ struct SessionDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await model.reload() }
         .wodTimer($timer, log: logger(for: timerBlock))
+    }
+
+    private func startWod(_ block: Block) {
+        let lib: LibraryWod? = WodLibrary.find(block.wod)
+        let plan: WodPlan = WodPlan.make(library: lib, block: block, board: board(for: block))
+        timerBlock = block
+        timer = WodTimerItem(plan: plan)
     }
 
     /// The leaderboard for a WOD block: the one the trainer picked, else an open one for the same library WOD.

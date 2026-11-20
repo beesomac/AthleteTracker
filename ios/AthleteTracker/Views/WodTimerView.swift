@@ -340,44 +340,49 @@ struct WodTimerView: View {
 
     private func setsList(_ sets: [WodSet], current: Int) -> some View {
         VStack(spacing: 4) {
-            ForEach(Array(sets.enumerated()), id: \.offset) { i, s in
-                HStack(spacing: 6) {
-                    Text(s.target).font(.title3.bold())
-                        .foregroundStyle(i == current ? .orange : .primary)
-                    Text(s.name).font(.title3)
-                }
-                .opacity(current >= 0 && i < current ? 0.4 : 1)
-                .strikethrough(current >= 0 && i < current)
+            ForEach(sets.indices, id: \.self) { (i: Int) in
+                TimerSetLine(set: sets[i], isCurrent: i == current, isDone: current >= 0 && i < current)
             }
         }
     }
 
     // MARK: Done
 
+    private var doneSubtitle: String {
+        "\(spec.label) · \(splits.count) split\(splits.count == 1 ? "" : "s")"
+    }
+
+    /// Rounds with a time (or a timed movement), for the summary after Finish.
+    private var timedRounds: [TimedRound] {
+        let mapped: WodPlan.Mapped = plan.map(splits: splits, by: by)
+        var out: [TimedRound] = []
+        for (i, r) in mapped.rounds.enumerated() {
+            let setTimes: [String] = r.sets.compactMap { s in
+                guard let t = s.time else { return nil }
+                return "\(s.set.name) \(WodClock.text(t, tenths: true))"
+            }
+            guard r.time != nil || !setTimes.isEmpty else { continue }
+            out.append(TimedRound(
+                id: i,
+                time: r.time.map { WodClock.text($0, tenths: true) } ?? "–",
+                movements: by == .set ? setTimes.joined(separator: " · ") : ""
+            ))
+        }
+        return out
+    }
+
     private var done: some View {
-        let mapped = plan.map(splits: splits, by: by)
-        let timed = mapped.rounds.enumerated().filter { $0.element.time != nil || $0.element.sets.contains { $0.time != nil } }
+        let timed: [TimedRound] = timedRounds
         return ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 Text(plan.title).font(.system(size: 34, weight: .bold, design: .rounded))
                 Text(hitLimit && spec.mode == .down ? "Time's up" : WodClock.text(elapsed, tenths: true))
                     .font(.system(size: 72, weight: .bold, design: .rounded).monospacedDigit())
-                Text("\(spec.label) · \(splits.count) split\(splits.count == 1 ? "" : "s")").foregroundStyle(.secondary)
+                Text(doneSubtitle).foregroundStyle(.secondary)
                 if !timed.isEmpty {
                     VStack(spacing: 8) {
-                        ForEach(timed, id: \.offset) { i, r in
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack {
-                                    Text("Round \(i + 1)")
-                                    Spacer()
-                                    Text(r.time.map { WodClock.text($0, tenths: true) } ?? "–").bold().monospacedDigit()
-                                }
-                                if by == .set {
-                                    Text(r.sets.compactMap { s in s.time.map { "\(s.set.name) \(WodClock.text($0, tenths: true))" } }.joined(separator: " · "))
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                            Divider()
+                        ForEach(timed) { (r: TimedRound) in
+                            TimedRoundRow(round: r)
                         }
                     }
                 }
@@ -476,19 +481,81 @@ struct RoundTimesView: View {
     let detail: WodDetail
 
     var body: some View {
-        ForEach(Array(detail.rounds.enumerated()), id: \.offset) { i, r in
-            VStack(alignment: .leading, spacing: 2) {
-                HStack {
-                    Text("Round \(i + 1)")
-                    Spacer()
-                    Text(r.time.map { WodClock.text($0, tenths: true) } ?? "–").monospacedDigit()
-                }
-                let changed = r.sets.filter { $0.actual != nil }
-                if !changed.isEmpty {
-                    Text(changed.map { "\($0.name): \($0.actual!)" }.joined(separator: " · "))
-                        .font(.caption).foregroundStyle(.secondary)
-                }
+        ForEach(detail.rounds.indices, id: \.self) { (i: Int) in
+            SavedRoundRow(index: i, round: detail.rounds[i])
+        }
+    }
+}
+
+struct SavedRoundRow: View {
+    let index: Int
+    let round: WodDetail.Round
+
+    private var timeText: String {
+        guard let t = round.time else { return "–" }
+        return WodClock.text(t, tenths: true)
+    }
+
+    private var changes: String {
+        let bits: [String] = round.sets.compactMap { s in
+            guard let a = s.actual else { return nil }
+            return "\(s.name): \(a)"
+        }
+        return bits.joined(separator: " · ")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text("Round \(index + 1)")
+                Spacer()
+                Text(timeText).monospacedDigit()
             }
+            if !changes.isEmpty {
+                Text(changes).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+/// One movement on the running timer: reps in bold, then the name.
+struct TimerSetLine: View {
+    let set: WodSet
+    let isCurrent: Bool
+    let isDone: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(set.target).font(.title3.bold())
+                .foregroundStyle(isCurrent ? Color.orange : Color.primary)
+            Text(set.name).font(.title3)
+        }
+        .opacity(isDone ? 0.4 : 1)
+        .strikethrough(isDone)
+    }
+}
+
+/// One line of the timer's summary.
+struct TimedRound: Identifiable {
+    let id: Int
+    let time: String
+    let movements: String
+}
+
+struct TimedRoundRow: View {
+    let round: TimedRound
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text("Round \(round.id + 1)")
+                Spacer()
+                Text(round.time).bold().monospacedDigit()
+            }
+            if !round.movements.isEmpty {
+                Text(round.movements).font(.caption).foregroundStyle(.secondary)
+            }
+            Divider()
         }
     }
 }

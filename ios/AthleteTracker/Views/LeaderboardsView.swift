@@ -60,36 +60,9 @@ struct LeaderboardDetailView: View {
 
     var body: some View {
         List {
-            Section {
-                if let d = wod.description, !d.isEmpty { Text(d) }
-                LabeledContent("Score", value: WodScore.label(wod.scoreType))
-                if let cap = wod.timeCapSeconds, cap > 0 {
-                    LabeledContent("Time cap", value: WodScore.format("time", Double(cap)))
-                }
-                if let lib = WodLibrary.find(wod.libraryId) {
-                    NavigationLink("Benchmark history") { BenchmarkDetailView(wod: lib) }
-                }
-                Button {
-                    timer = WodTimerItem(plan: plan)
-                } label: {
-                    Label("Start WOD", systemImage: "stopwatch")
-                }
-            }
-
-            let mine = model.history(for: wod).filter { $0.detail?.roundTimes.isEmpty == false }
-            if let last = mine.first, let d = last.detail {
-                Section("Your last rounds") { RoundTimesView(detail: d) }
-            }
-
-            Section("Leaderboard") {
-                let rows = model.boardRows(wod)
-                if rows.isEmpty {
-                    Text("No scores yet. Be the first.").foregroundStyle(.secondary)
-                }
-                ForEach(rows) { item in
-                    BoardLine(rank: item.rank, row: item.row, scoreType: wod.scoreType)
-                }
-            }
+            infoSection
+            lastRoundsSection
+            boardSection
         }
         .navigationTitle(wod.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -102,13 +75,58 @@ struct LeaderboardDetailView: View {
             }
         }
         .sheet(isPresented: $logging) {
-            LogScoreSheet(title: wod.name, scoreType: wod.scoreType, timeCap: wod.timeCapSeconds, plan: plan) { score, rx, day, note, detail in
-                try await model.logResult(on: wod, score: score, rx: rx, on: day, note: note, detail: detail)
+            LogScoreSheet(title: wod.name, scoreType: wod.scoreType, timeCap: wod.timeCapSeconds, plan: plan, save: logScore)
+        }
+        .wodTimer($timer, log: wod.isOpen ? logScore : nil)
+    }
+
+    private func logScore(_ score: Double, _ rx: Bool, _ day: Date, _ note: String, _ detail: WodDetail?) async throws {
+        try await model.logResult(on: wod, score: score, rx: rx, on: day, note: note, detail: detail)
+    }
+
+    @ViewBuilder private var infoSection: some View {
+        Section {
+            if let d = wod.description, !d.isEmpty { Text(d) }
+            LabeledContent("Score", value: WodScore.label(wod.scoreType))
+            if let cap = wod.timeCapSeconds, cap > 0 {
+                LabeledContent("Time cap", value: WodScore.format("time", Double(cap)))
+            }
+            if let lib = WodLibrary.find(wod.libraryId) {
+                NavigationLink("Benchmark history") { BenchmarkDetailView(wod: lib) }
+            }
+            Button {
+                timer = WodTimerItem(plan: plan)
+            } label: {
+                Label("Start WOD", systemImage: "stopwatch")
             }
         }
-        .wodTimer($timer, log: wod.isOpen ? { score, rx, day, note, detail in
-            try await model.logResult(on: wod, score: score, rx: rx, on: day, note: note, detail: detail)
-        } : nil)
+    }
+
+    /// The athlete's latest score here that has round times.
+    private var lastDetail: WodDetail? {
+        let rows: [ResultRow] = model.history(for: wod)
+        for r in rows {
+            if let d = r.detail, !d.roundTimes.isEmpty { return d }
+        }
+        return nil
+    }
+
+    @ViewBuilder private var lastRoundsSection: some View {
+        if let d = lastDetail {
+            Section("Your last rounds") { RoundTimesView(detail: d) }
+        }
+    }
+
+    @ViewBuilder private var boardSection: some View {
+        let rows: [RankedRow] = model.boardRows(wod)
+        Section("Leaderboard") {
+            if rows.isEmpty {
+                Text("No scores yet. Be the first.").foregroundStyle(.secondary)
+            }
+            ForEach(rows) { (item: RankedRow) in
+                BoardLine(rank: item.rank, row: item.row, scoreType: wod.scoreType)
+            }
+        }
     }
 }
 
