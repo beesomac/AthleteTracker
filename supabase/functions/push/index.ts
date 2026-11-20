@@ -40,12 +40,27 @@ function b64url(data: Uint8Array | string): string {
   return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+// Accepts the .p8 pasted with or without its BEGIN/END lines, with real or escaped (\\n) line
+// breaks, quotes or stray spaces. Never logs the key itself.
+function p8Bytes(raw: string): Uint8Array {
+  const body = raw
+    .replace(/\\[nr]/g, "\n")
+    .replace(/-----(BEGIN|END)[^-]*-----/g, "")
+    .replace(/(BEGIN|END) (EC )?PRIVATE KEY/g, "")
+    .replace(/[^A-Za-z0-9+/=]/g, "")
+    .replace(/=+$/, "");
+  const padded = body + "=".repeat((4 - (body.length % 4)) % 4);
+  try {
+    return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
+  } catch {
+    throw new Error(`APNS_PRIVATE_KEY isn't a readable .p8 key (${body.length} base64 characters after cleaning; a .p8 has about 200)`);
+  }
+}
+
 async function apnsJwt(): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   if (cached && now - cached.at < 40 * 60) return cached.jwt;
-  const pem = PRIVATE_KEY.replace(/\\n/g, "\n").replace(/-----[^-]+-----/g, "").replace(/\s+/g, "");
-  const der = Uint8Array.from(atob(pem), (c) => c.charCodeAt(0));
-  const key = await crypto.subtle.importKey("pkcs8", der, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+  const key = await crypto.subtle.importKey("pkcs8", p8Bytes(PRIVATE_KEY), { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
   const input = b64url(JSON.stringify({ alg: "ES256", kid: KEY_ID })) + "." + b64url(JSON.stringify({ iss: TEAM_ID, iat: now }));
   const sig = new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, new TextEncoder().encode(input)));
   cached = { jwt: input + "." + b64url(sig), at: now };
@@ -103,6 +118,14 @@ Deno.serve(async (req) => {
     ...(n.wod_id ? { wod_id: n.wod_id } : {}),
     ...(n.session_id ? { session_id: n.session_id } : {}),
   };
+
+  try {
+    await apnsJwt();
+  } catch (e) {
+    await db.from("notifications").update({ pushed_at: null }).eq("id", n.id);
+    console.error(String(e));
+    return json({ error: String(e) }, 500);
+  }
 
   const results = [];
   for (const t of tokens ?? []) {
