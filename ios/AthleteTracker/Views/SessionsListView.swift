@@ -34,34 +34,13 @@ struct SessionsListView: View {
             .navigationTitle(model.athleteName.isEmpty ? "Sessions" : model.athleteName)
             .navigationDestination(for: ProgramRow.self) { SessionDetailView(program: $0) }
             .refreshable { await model.reload() }
-            .toolbar { toolbar }
+            .toolbar { AccountMenu() }
         }
     }
 
     private func row(_ p: ProgramRow) -> some View {
         NavigationLink(value: p) {
             SessionRow(program: p, done: model.doneSets(p), finished: model.finished[p.id] != nil)
-        }
-    }
-
-    @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
-            Menu {
-                if model.isTrainer && !model.athletes.isEmpty {
-                    Picker("Athlete", selection: Binding(
-                        get: { model.athleteEmail ?? "" },
-                        set: { email in Task { await model.pickAthlete(email) } }
-                    )) {
-                        ForEach(model.athletes) { Text($0.name).tag($0.email) }
-                    }
-                    Divider()
-                }
-                if let email = model.email { Text(email) }
-                Button("Sign out", role: .destructive) { Task { await model.signOut() } }
-            } label: {
-                Image(systemName: model.isTrainer ? "person.2.circle" : "person.circle")
-            }
         }
     }
 }

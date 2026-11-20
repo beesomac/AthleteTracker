@@ -1,8 +1,16 @@
 # Training Log for iPhone
 
-A SwiftUI app that signs in with the same Supabase accounts as the website and shows the
-signed-in athlete's published sessions (read-only for now). A trainer can switch athletes
-from the person menu, the same way as the website's athlete picker.
+A SwiftUI app that signs in with the same Supabase accounts as the website. Three tabs:
+
+- **Program**: the athlete's published sessions (read-only, except logging a 1RM test).
+- **Leaderboards**: every open and closed board, ranked Rx first; log a score on open ones.
+- **Benchmarks**: 1RMs for the main lifts (plus any other lift with a number), the Girls, and
+  the CrossFit Open by year, each with the athlete's best and history.
+
+Logging a 1RM in a program (an exercise with `log: "1rm"`, or "1RM" in its target or name)
+fills in that lift's 1RM benchmark when it beats the current number. The website does the same.
+
+A trainer can switch athletes from the person menu, the same way as the website's athlete picker.
 
 ## Open and run it (Mac)
 
@@ -33,6 +41,12 @@ The session is stored in the Keychain, so you stay signed in.
 | `programs` | published sessions for the athlete (or for everyone) |
 | `ticks` | done sets and what was logged (kg / reps / secs) |
 | `session_finishes` | finished badge (optional; ignored if the table is missing) |
+| `wods`, `wod_board()`, `wod_results` | leaderboards, rankings, the athlete's scores |
+| `lift_maxes` | 1RM benchmarks (written when you log or edit a 1RM) |
+| `log_benchmark()` | logs a benchmark with no leaderboard yet (needs `supabase/008_benchmarks.sql`) |
+
+The benchmark list is `AthleteTracker/Resources/wods.json`, a copy of the website's `wods.json`.
+Copy it again after changing the library: `cp wods.json ios/AthleteTracker/Resources/wods.json`.
 
 Row-level security does the filtering, exactly as for the website. Connection settings live in
 `AthleteTracker/Data/Config.swift` (the public publishable key, same as `config.js`).

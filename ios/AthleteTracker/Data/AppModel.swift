@@ -3,7 +3,8 @@ import Observation
 import Supabase
 
 /// App state: who is signed in, which athlete we're looking at, and their sessions.
-/// Reads only. Ticking sets from the phone comes in a later step.
+/// Programs are read-only apart from logging a 1RM; leaderboards, benchmarks and 1RMs
+/// are in AppModel+Benchmarks.swift.
 /// Main-actor isolated by default (SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor).
 @Observable
 final class AppModel {
@@ -30,6 +31,11 @@ final class AppModel {
     var programs: [ProgramRow] = []
     var ticks: [String: TickRow] = [:]          // "sessionId__exerciseId"
     var finished: [String: FinishRow] = [:]     // sessionId
+
+    var wods: [WodRow] = []                     // leaderboards (not drafts)
+    var board: [BoardRow] = []                  // wod_board(): best score per athlete per board
+    var results: [ResultRow] = []               // the athlete's own scores
+    var maxes: [String: LiftMax] = [:]          // lift key → 1RM
     var isLoading = false
     var loadError: String?
 
@@ -75,6 +81,10 @@ final class AppModel {
         programs = []
         ticks = [:]
         finished = [:]
+        wods = []
+        board = []
+        results = []
+        maxes = [:]
         loadError = nil
     }
 
@@ -142,6 +152,7 @@ final class AppModel {
                 .eq("athlete_email", value: athlete)
                 .execute().value) ?? []
             finished = Dictionary(finishRows.map { ($0.sessionId, $0) }, uniquingKeysWith: { a, _ in a })
+            await loadBenchmarks(for: athlete)
             loadError = nil
         } catch {
             loadError = error.localizedDescription

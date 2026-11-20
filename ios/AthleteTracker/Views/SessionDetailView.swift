@@ -37,7 +37,7 @@ struct SessionDetailView: View {
                         Text(note).font(.callout).foregroundStyle(.secondary)
                     }
                     ForEach(block.exercises) { ex in
-                        ExerciseRow(exercise: ex, tick: model.tick(program, ex))
+                        ExerciseRow(program: program, exercise: ex, tick: model.tick(program, ex))
                     }
                 } header: {
                     HStack {
@@ -68,8 +68,11 @@ struct SessionDetailView: View {
 }
 
 struct ExerciseRow: View {
+    @Environment(AppModel.self) private var model
+    let program: ProgramRow
     let exercise: Exercise
     let tick: TickRow?
+    @State private var loggingMax = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -96,6 +99,28 @@ struct ExerciseRow: View {
             }
             .font(.subheadline)
             .foregroundStyle(.secondary)
+
+            if exercise.isOneRepMax {
+                HStack {
+                    if let m = model.oneRepMax(exercise) {
+                        Label("1RM \(SessionFormat.number(m.kg)) kg", systemImage: "trophy")
+                    } else {
+                        Label("No 1RM yet", systemImage: "trophy")
+                    }
+                    Spacer()
+                    Button("Log 1RM") { loggingMax = true }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                }
+                .font(.footnote)
+                .sheet(isPresented: $loggingMax) {
+                    OneRepMaxSheet(
+                        title: Lift.displayName(exercise.name),
+                        current: model.oneRepMax(exercise)?.kg,
+                        save: { kg in _ = try await model.logOneRepMax(program, exercise, kg: kg) }
+                    )
+                }
+            }
 
             if let cue = exercise.cue, !cue.isEmpty {
                 Text(cue).font(.footnote).foregroundStyle(.secondary)
