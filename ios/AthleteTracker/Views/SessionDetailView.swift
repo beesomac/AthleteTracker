@@ -4,6 +4,8 @@ import SwiftUI
 struct SessionDetailView: View {
     @Environment(AppModel.self) private var model
     let program: ProgramRow
+    @State private var timer: WodTimerItem?
+    @State private var timerBlock: Block?
 
     var body: some View {
         List {
@@ -36,6 +38,14 @@ struct SessionDetailView: View {
                     if let note = block.note, !note.isEmpty {
                         Text(note).font(.callout).foregroundStyle(.secondary)
                     }
+                    if block.isWod {
+                        Button {
+                            timerBlock = block
+                            timer = WodTimerItem(plan: WodPlan.make(library: WodLibrary.find(block.wod), block: block, board: board(for: block)))
+                        } label: {
+                            Label("Start WOD", systemImage: "stopwatch")
+                        }
+                    }
                     ForEach(block.exercises) { ex in
                         ExerciseRow(program: program, exercise: ex, tick: model.tick(program, ex))
                     }
@@ -60,6 +70,32 @@ struct SessionDetailView: View {
         .navigationTitle(program.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await model.reload() }
+        .wodTimer($timer, log: logger(for: timerBlock))
+    }
+
+    /// The leaderboard for a WOD block: the one the trainer picked, else an open one for the same library WOD.
+    private func board(for block: Block) -> WodRow? {
+        if let id = block.board, let b = model.wods.first(where: { $0.id == id }) { return b }
+        if let lib = block.wod { return model.wods.first { $0.libraryId == lib && $0.isOpen } }
+        return nil
+    }
+
+    /// Where a score from the timer goes: the block's open board, or the benchmark (which opens a
+    /// board). nil when there's nowhere to log it (the timer then just shows the splits).
+    private func logger(for block: Block?) -> ((Double, Bool, Date, String, WodDetail?) async throws -> Void)? {
+        guard let block else { return nil }
+        if let b = board(for: block) {
+            guard b.isOpen else { return nil }
+            return { score, rx, day, note, detail in
+                try await model.logResult(on: b, score: score, rx: rx, on: day, note: note, detail: detail)
+            }
+        }
+        if let lib = WodLibrary.find(block.wod) {
+            return { score, rx, day, note, detail in
+                try await model.logBenchmark(lib, score: score, rx: rx, on: day, note: note, detail: detail)
+            }
+        }
+        return nil
     }
 
     private func finishedLabel(_ iso: String) -> String {

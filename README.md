@@ -78,7 +78,7 @@ Everything lives in Supabase, readable with the anon key plus a signed-in user, 
 | `programs` | Published sessions: `id`, `athlete_email` (null = everyone), `date`, `title`, `body` (the session JSON) |
 | `ticks`, `notes`, `session_finishes`, `lift_maxes` | Per-athlete feedback, keyed by `athlete_email` + `session_id` (= program `id`) |
 | `wods`, `wod_board()` | WODs and their ranked boards (names only, best score per athlete). Scores: seconds for time, reps, kg, or rounds × 1000 + reps; `wod.js` formats them |
-| `wod_results` | An athlete's own scores; insert one to log a score on an open WOD |
+| `wod_results` | An athlete's own scores; insert one to log a score on an open WOD. `detail` (jsonb, after `011`) holds rounds, what was actually done, and timer splits |
 | `log_benchmark()` | From `supabase/008_benchmarks.sql`: log a benchmark (wods.json id) and open its leaderboard if there isn't one |
 | `wod_board_members` | (007) Who is on each leaderboard; an athlete can read their own rows |
 | `notifications` | (007) Each person's inbox: `kind` `score`, `board_added` or `wod_again`, `title`, `body`, `read_at`; read and mark your own |

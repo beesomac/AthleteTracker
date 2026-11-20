@@ -610,11 +610,105 @@
     let hist;
     if (h.length) {
       const best = W.rank(h[0].type, h.slice())[0];
-      hist = `<b>${esc(you)} ${isTrainer() ? "has" : "have"} done this before.</b><ul>${h.slice(0, 5).map((r) => `<li><span>${esc(fmtDate(r.performed_on))}</span><b>${esc(txt(r))}</b>${r === best && h.length > 1 ? ` <span class="chip back">Best</span>` : ""}${r.note ? ` <span class="extra">${esc(r.note)}</span>` : ""}</li>`).join("")}</ul>`;
+      hist = `<b>${esc(you)} ${isTrainer() ? "has" : "have"} done this before.</b><ul>${h.slice(0, 5).map((r) => `<li><span>${esc(fmtDate(r.performed_on))}</span><b>${esc(txt(r))}</b>${r === best && h.length > 1 ? ` <span class="chip back">Best</span>` : ""}${r.note ? ` <span class="extra">${esc(r.note)}</span>` : ""}${roundTimesHTML(r.detail)}</li>`).join("")}</ul>`;
     } else hist = `<b>First time${isTrainer() ? " for " + esc(athleteName()) : ""}.</b> Your score today sets the benchmark.`;
     const mine = !isTrainer() || info.athlete === String(state.me || "").toLowerCase();
     const canLog = board && board.status === "open" && mine;
-    return `<div class="wod-panel"><div class="wod-hist">${hist}</div>${board ? `<div class="wod-board-row"><span class="extra">Leaderboard: ${esc(board.name)}${board.status === "closed" ? " (closed)" : ""}</span>${canLog ? `<button class="btn" data-act="score-from-session" data-wod="${esc(board.id)}">Log score</button>` : `<a class="btn" href="#boards">See board</a>`}</div>` : ""}</div>`;
+    const sid = (currentView() || {}).id || "";
+    const startBtn = window.WodTimer ? `<button class="btn primary" data-act="start-wod" data-sid="${esc(sid)}" data-bkey="${esc(b.key)}" data-wod="${esc(canLog ? board.id : "")}">Start WOD</button>` : "";
+    return `<div class="wod-panel"><div class="wod-hist">${hist}</div>${board ? `<div class="wod-board-row"><span class="extra">Leaderboard: ${esc(board.name)}${board.status === "closed" ? " (closed)" : ""}</span><span class="row">${startBtn}${canLog ? `<button class="btn" data-act="score-from-session" data-wod="${esc(board.id)}" data-sid="${esc(sid)}" data-bkey="${esc(b.key)}">Log score</button>` : `<a class="btn" href="#boards">See board</a>`}</span></div>` : startBtn ? `<div class="wod-board-row"><span class="extra">Timer only: there's no leaderboard for this WOD.</span>${startBtn}</div>` : ""}</div>`;
+  }
+
+  // ─── Rounds on a score, and the WOD timer (wodtimer.js, 011) ───────────────────────────
+  const WT = window.WodTimer;
+  function roundTimesHTML(d) {
+    if (!d || !Array.isArray(d.rounds)) return "";
+    const ts = d.rounds.map((r) => r.time).filter((t) => t != null);
+    return ts.length ? `<div class="wod-rounds">Rounds: ${ts.map((t) => esc(WT ? WT.clock(t, true) : t)).join(" · ")}</div>` : "";
+  }
+  function roundTimesText(rounds) {
+    const ts = rounds.map((r) => r.time).filter((t) => t != null);
+    return ts.length ? "Rounds " + ts.map((t) => WT.clock(t, true)).join(", ") : "";
+  }
+  // The plan for a leaderboard, or for a program block (a WOD from the library, or its own exercises).
+  function planFor(boardId, sid, bkey) {
+    if (!WT) return null;
+    const w = state.wods.find((x) => x.id === boardId);
+    const s = sid && state.sessions.find((x) => x.id === sid);
+    const b = s && (s.blocks || []).find((x) => x.key === bkey);
+    return WT.plan({ libraryId: (b && b.wod) || (w && w.library_id), block: b, cap: w && w.time_cap_seconds, scoreType: w && w.score_type, title: (w && w.name) || (b && b.name) });
+  }
+  // A fresh score form for a board: rounds from the plan, filled from the timer when there is one.
+  function newDraft(boardId, p, res) {
+    const d = { wod: boardId, plan: p, splits: res ? res.splits : [], by: res ? res.by : WT.defaultBy(p), timer: res ? res.timer : null, rounds: [], scoreText: "", capped: false, note: "", rx: true };
+    mapDraft(d);
+    if (res) {
+      const type = p.scoreType, m = res.mapped;
+      if (type === "time") {
+        if (res.hitLimit && res.timerSpec && res.timerSpec.mode === "down") { d.capped = true; d.scoreText = m.reps ? String(m.reps) : ""; }
+        else d.scoreText = WT.clock(res.elapsed, true).replace(/\.0$/, "");
+      } else if (type === "rounds_reps" && p.repeat) {
+        const perRound = (p.rounds[0] || []).reduce((a, x) => a + WT.repsOf(x.target), 0);
+        const extra = Math.max(0, m.reps - m.doneRounds * perRound);
+        d.scoreText = m.doneRounds + (extra ? "+" + extra : "");
+      } else if (type === "reps" && m.reps) d.scoreText = String(m.reps);
+    }
+    return d;
+  }
+  // Round and set times from the splits; keeps whatever was typed in "actual".
+  function mapDraft(d) {
+    if (!d.plan || !(d.plan.rounds || d.splits.length)) { d.rounds = []; return; }
+    const m = WT.mapSplits(d.plan, d.splits, d.by);
+    const old = d.rounds;
+    d.rounds = m.rounds.map((r, i) => ({
+      time: r.time != null ? WT.clock(r.time, true) : (old[i] && !d.splits.length ? old[i].time : ""),
+      sets: r.sets.map((x, j) => ({ name: x.name, target: x.target, time: x.time, actual: (old[i] && old[i].sets[j] && old[i].sets[j].actual) || "" })),
+    }));
+    if (d.extraRounds) for (let k = 0; k < d.extraRounds; k++) addRound(d, true);
+  }
+  function addRound(d, quiet) {
+    const R = d.plan.rounds || [];
+    const tpl = R.length ? R[d.rounds.length % R.length] : [];
+    d.rounds.push({ time: "", sets: tpl.map((x) => ({ name: x.name, target: x.target, time: null, actual: "" })) });
+    if (!quiet) d.extraRounds = (d.extraRounds || 0) + 1;
+  }
+  function draftHTML(d) {
+    if (!d || !d.rounds.length) return "";
+    const R = d.plan.rounds || [];
+    return `<div class="sd"><div class="sd-head"><span>Rounds${d.splits.length ? ` · ${d.splits.length} split${d.splits.length === 1 ? "" : "s"} from the timer` : ""}</span>
+      ${d.splits.length && R.length ? `<span class="seg"><button type="button" data-act="sd-by" data-v="round" aria-pressed="${d.by === "round"}">Splits = rounds</button><button type="button" data-act="sd-by" data-v="set" aria-pressed="${d.by === "set"}">= movements</button></span>` : ""}</div>
+      ${d.rounds.map((r, i) => `<div class="sd-round"><div class="sd-rtop"><b>Round ${i + 1}</b><input type="text" class="sd-in" data-r="${i}" data-k="time" value="${esc(r.time)}" placeholder="time" inputmode="text" aria-label="Round ${i + 1} time"></div>
+        ${r.sets.map((x, j) => `<div class="sd-set"><span class="plan">${esc(x.name)} <small>${esc(x.target)}${x.time != null ? " · " + esc(WT.clock(x.time, true)) : ""}</small></span><input type="text" class="sd-in" data-r="${i}" data-s="${j}" value="${esc(x.actual)}" placeholder="${esc(String(x.target || "").split(/[ ,@]/)[0] || "done")}" aria-label="${esc(x.name)}, round ${i + 1}, what you did"></div>`).join("")}
+      </div>`).join("")}
+      ${d.plan.repeat || !R.length ? `<div><button type="button" class="btn" data-act="sd-add-round">+ Add round</button></div>` : ""}
+      <div class="extra">Round times are optional (mm:ss). Leave "what you did" blank if you did it as written.</div></div>`;
+  }
+  // Draft → the detail saved with the score, or null when nothing was filled in.
+  function draftDetail(d) {
+    if (!d || !d.rounds.length) return null;
+    const rounds = d.rounds.map((r) => {
+      const t = W.parse("time", r.time);
+      return { time: t, sets: r.sets.map((x) => { const o = { name: x.name, target: x.target }; if (x.actual.trim()) o.actual = x.actual.trim().slice(0, 60); if (x.time != null) o.time = x.time; return o; }) };
+    });
+    const any = d.splits.length || rounds.some((r) => r.time != null || r.sets.some((x) => x.actual));
+    if (!any) return null;
+    const out = { rounds };
+    if (d.splits.length) { out.splits = d.splits; out.split_by = d.by; }
+    if (d.timer) out.timer = d.timer;
+    return out;
+  }
+  function startWod(boardId, sid, bkey) {
+    const p = planFor(boardId, sid, bkey);
+    if (!p) return;
+    WT.open({
+      plan: p,
+      onLog: boardId ? (res) => {
+        state.scoreDraft = newDraft(boardId, p, res);
+        state.openScore = boardId;
+        if (location.hash !== "#boards") location.hash = "boards"; else render();
+        setTimeout(() => { const el = document.querySelector(".score-form"); if (el) el.scrollIntoView({ block: "start" }); }, 80);
+      } : null,
+    });
   }
 
   // ─── Notifications inbox (007) ─────────────────────────────────────────────────────────
@@ -650,17 +744,18 @@
       html += `<article class="board">
         <div class="board-head"><div><div class="ex-name">${esc(w.name)}</div>
           <div class="extra">${esc(t.label)}${w.time_cap_seconds ? ` · cap ${esc(W.format("time", w.time_cap_seconds))}` : ""}${w.wod_date ? ` · ${esc(fmtDate(w.wod_date))}` : ""}${w.status === "closed" ? " · closed" : ""}</div></div>
-          ${canLog ? `<button class="btn" data-act="open-score" data-wod="${esc(w.id)}">Log score</button>` : ""}</div>
+          ${canLog ? `<span class="row">${WT ? `<button class="btn primary" data-act="start-wod" data-wod="${esc(w.id)}">Start WOD</button>` : ""}<button class="btn" data-act="open-score" data-wod="${esc(w.id)}">Log score</button></span>` : ""}</div>
         ${w.description ? `<div class="cue wod-desc">${esc(w.description)}</div>` : ""}
         ${rows.length ? `<ol class="ranks">${rows.map((r) => `<li class="${r.is_me ? "me" : ""}"><span class="rank">${r.rank}</span><span class="who">${esc(r.athlete_name)}${r.is_me ? " (you)" : ""}${r.rx ? "" : ` <span class="chip swap">Scaled</span>`}</span><span class="score">${esc(W.format(w.score_type, r.score))}</span></li>`).join("")}</ol>` : `<div class="extra">No scores yet.</div>`}
-        ${state.openScore === w.id ? `<form class="score-form" data-wod="${esc(w.id)}" data-type="${esc(w.score_type)}">
-          ${w.score_type === "time" ? `<label class="check"><input id="score-capped" type="checkbox"> Didn't finish in the time cap${w.time_cap_seconds ? ` (${esc(W.format("time", w.time_cap_seconds))})` : ""}</label>` : ""}
-          <label><span id="score-label">Score (${esc(t.hint)})</span><input id="score-text" type="text" inputmode="${w.score_type === "time" || w.score_type === "rounds_reps" ? "text" : "decimal"}" required autocomplete="off"></label>
+        ${state.openScore === w.id ? (() => { const d = state.scoreDraft && state.scoreDraft.wod === w.id ? state.scoreDraft : null; const cap = !!(d && d.capped); return `<form class="score-form" data-wod="${esc(w.id)}" data-type="${esc(w.score_type)}">
+          ${w.score_type === "time" ? `<label class="check"><input id="score-capped" type="checkbox"${cap ? " checked" : ""}> Didn't finish in the time cap${w.time_cap_seconds ? ` (${esc(W.format("time", w.time_cap_seconds))})` : ""}</label>` : ""}
+          <label><span id="score-label">${cap ? "Reps done at the cap (scores CAP + reps)" : `Score (${esc(t.hint)})`}</span><input id="score-text" type="text" inputmode="${cap ? "numeric" : w.score_type === "time" || w.score_type === "rounds_reps" ? "text" : "decimal"}" required autocomplete="off" value="${esc(d ? d.scoreText : "")}"></label>
           <label>Date<input id="score-on" type="date" value="${esc(localDay(new Date().toISOString()))}"></label>
-          <label class="check"><input id="score-rx" type="checkbox" checked> Rx (as written)</label>
-          <label>Note<input id="score-note" type="text" maxlength="500" placeholder="Optional, e.g. scaled to 30 kg"></label>
+          <label class="check"><input id="score-rx" type="checkbox"${!d || d.rx ? " checked" : ""}> Rx (as written)</label>
+          <label>Note<input id="score-note" type="text" maxlength="500" placeholder="Optional, e.g. scaled to 30 kg" value="${esc(d ? d.note : "")}"></label>
+          ${draftHTML(d)}
           <div class="row"><button type="button" class="btn" data-act="cancel-score">Cancel</button><button type="submit" class="btn primary">Save score</button></div>
-        </form>` : ""}
+        </form>`; })() : ""}
       </article>`;
     }
     return html + `</div>`;
@@ -739,9 +834,23 @@
   app.addEventListener("change", (ev) => {
     if (ev.target.id !== "score-capped") return;
     const cap = ev.target.checked, inp = $("#score-text");
+    if (state.scoreDraft) state.scoreDraft.capped = cap;
     $("#score-label").textContent = cap ? "Reps done at the cap (scores CAP + reps)" : `Score (${W.TYPES.time.hint})`;
     inp.inputMode = cap ? "numeric" : "text"; inp.placeholder = cap ? "e.g. 45" : ""; inp.focus();
   });
+
+  // What's typed on a score form survives a re-render (live updates redraw the page).
+  app.addEventListener("input", (ev) => {
+    const d = state.scoreDraft, el = ev.target;
+    if (!d || !el.closest || !el.closest(".score-form")) return;
+    if (el.id === "score-text") d.scoreText = el.value;
+    else if (el.id === "score-note") d.note = el.value;
+    else if (el.classList.contains("sd-in")) {
+      const r = d.rounds[+el.dataset.r]; if (!r) return;
+      if (el.dataset.k === "time") r.time = el.value; else if (r.sets[+el.dataset.s]) r.sets[+el.dataset.s].actual = el.value;
+    }
+  });
+  app.addEventListener("change", (ev) => { if (ev.target.id === "score-rx" && state.scoreDraft) state.scoreDraft.rx = ev.target.checked; });
 
   // Typing a weight saves it and ticks the set.
   app.addEventListener("change", async (ev) => {
@@ -807,8 +916,10 @@
       if (score == null) { flash(cap ? "Enter the total reps you finished before the cap, e.g. 45." : "That score doesn't look right. Use " + W.TYPES[f.dataset.type].hint + (f.dataset.type === "time" ? ", or tick \"Didn't finish\" for CAP + reps." : ".")); return; }
       const btn = f.querySelector('[type="submit"]'); btn.disabled = true;
       try {
-        await store.addResult({ wod: f.dataset.wod, score, rx: $("#score-rx").checked, on: $("#score-on").value, note: $("#score-note").value.trim() });
-        state.openScore = null; render();
+        const d = state.scoreDraft && state.scoreDraft.wod === f.dataset.wod ? state.scoreDraft : null;
+        const detail = draftDetail(d);
+        await store.addResult({ wod: f.dataset.wod, score, rx: $("#score-rx").checked, on: $("#score-on").value, note: $("#score-note").value.trim(), detail, detailText: detail ? roundTimesText(detail.rounds) : "" });
+        state.openScore = null; state.scoreDraft = null; render();
       } catch (e) { btn.disabled = false; writeFailed(e); }
       return;
     }
@@ -991,16 +1102,26 @@
       try { await store.deleteNote(id); } catch (e) { state.notes = keep; scheduleRender(); writeFailed(e); }
     } else if (act === "filter") {
       state.reviewFilter = btn.dataset.f; render();
+    } else if (act === "start-wod") {
+      startWod(btn.dataset.wod || null, btn.dataset.sid, btn.dataset.bkey);
+    } else if (act === "sd-by") {
+      const d = state.scoreDraft; if (!d) return;
+      d.by = btn.dataset.v; d.extraRounds = 0; mapDraft(d); render();
+    } else if (act === "sd-add-round") {
+      const d = state.scoreDraft; if (!d) return;
+      addRound(d); render();
     } else if (act === "open-score") {
-      state.openScore = state.openScore === btn.dataset.wod ? null : btn.dataset.wod; render();
+      state.openScore = state.openScore === btn.dataset.wod ? null : btn.dataset.wod;
+      state.scoreDraft = state.openScore && WT ? newDraft(state.openScore, planFor(state.openScore), null) : null;
+      render();
       const el = document.getElementById("score-text"); if (el) el.focus();
     } else if (act === "score-from-session") {
-      state.openScore = btn.dataset.wod; location.hash = "boards";
+      state.openScore = btn.dataset.wod; state.scoreDraft = WT ? newDraft(btn.dataset.wod, planFor(btn.dataset.wod, btn.dataset.sid, btn.dataset.bkey), null) : null; location.hash = "boards";
       setTimeout(() => { const el = document.getElementById("score-text"); if (el) { el.scrollIntoView({ block: "center" }); el.focus(); } }, 50);
     } else if (act === "clear-inbox") {
       try { await store.clearNotifications(); } catch (e) { writeFailed(e); }
     } else if (act === "cancel-score") {
-      state.openScore = null; render();
+      state.openScore = null; state.scoreDraft = null; render();
     } else if (act === "signout") {
       await store.signOut(); state.me = null; state.loaded = false; render();
     } else if (act === "login-again") {
@@ -1063,6 +1184,7 @@
 
   async function boot() {
     if (store.mode === "demo") $("#demo").hidden = false;
+    if (window.WodTimer) window.WodTimer.library().then(() => { if (state.loaded) scheduleRender(); });
     // The sessions/ files are the fallback until programs are published from the console.
     try { state.fileSessions = state.sessions = await loadSessions(); }
     catch (e) { console.warn("No session files", e); state.fileSessions = state.sessions = []; }
@@ -1071,5 +1193,5 @@
     if (email) await enter(email); else render();
   }
   boot();
-  if (window.TrainingStore.watchForUpdates) window.TrainingStore.watchForUpdates(["app.js", "store.js", "wod.js"]);
+  if (window.TrainingStore.watchForUpdates) window.TrainingStore.watchForUpdates(["app.js", "store.js", "wod.js", "wodtimer.js"]);
 })();

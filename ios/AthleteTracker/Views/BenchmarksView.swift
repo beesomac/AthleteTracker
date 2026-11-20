@@ -112,6 +112,9 @@ struct BenchmarkDetailView: View {
     @Environment(AppModel.self) private var model
     let wod: LibraryWod
     @State private var logging = false
+    @State private var timer: WodTimerItem?
+
+    private var plan: WodPlan { WodPlan.make(library: wod) }
 
     var body: some View {
         List {
@@ -119,6 +122,11 @@ struct BenchmarkDetailView: View {
                 if let d = wod.description, !d.isEmpty { Text(d) }
                 if let f = wod.format { LabeledContent("Format", value: f) }
                 LabeledContent("Score", value: WodScore.label(wod.score))
+                Button {
+                    timer = WodTimerItem(plan: plan)
+                } label: {
+                    Label("Start WOD", systemImage: "stopwatch")
+                }
             }
 
             Section("Your scores") {
@@ -133,6 +141,10 @@ struct BenchmarkDetailView: View {
                             Text(r.performedOn.map(SessionDate.label) ?? "")
                             if let note = r.note, !note.isEmpty {
                                 Text(note).font(.caption).foregroundStyle(.secondary)
+                            }
+                            if let d = r.detail, !d.roundTimes.isEmpty {
+                                Text("Rounds " + d.roundTimes.map { WodClock.text($0, tenths: true) }.joined(separator: " · "))
+                                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                             }
                         }
                         Spacer()
@@ -166,9 +178,12 @@ struct BenchmarkDetailView: View {
             }
         }
         .sheet(isPresented: $logging) {
-            LogScoreSheet(title: wod.name, scoreType: wod.score, timeCap: wod.cap) { score, rx, day, note in
-                try await model.logBenchmark(wod, score: score, rx: rx, on: day, note: note)
+            LogScoreSheet(title: wod.name, scoreType: wod.score, timeCap: wod.cap, plan: plan) { score, rx, day, note, detail in
+                try await model.logBenchmark(wod, score: score, rx: rx, on: day, note: note, detail: detail)
             }
+        }
+        .wodTimer($timer) { score, rx, day, note, detail in
+            try await model.logBenchmark(wod, score: score, rx: rx, on: day, note: note, detail: detail)
         }
     }
 }

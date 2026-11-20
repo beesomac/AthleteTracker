@@ -1,12 +1,16 @@
 import SwiftUI
 
 /// Log a WOD score: typed the way the board shows it (mm:ss, reps, kg, rounds+reps).
+/// With a plan, each round can take a time and what was actually done; a timer result fills
+/// in the score, the round times and the splits.
 struct LogScoreSheet: View {
     @Environment(\.dismiss) private var dismiss
     let title: String
     let scoreType: String
     var timeCap: Int? = nil
-    let save: (Double, Bool, Date, String) async throws -> Void
+    var plan: WodPlan? = nil
+    var prefill: TimerResult? = nil
+    let save: (Double, Bool, Date, String, WodDetail?) async throws -> Void
 
     @State private var text = ""
     @State private var capped = false
@@ -15,8 +19,25 @@ struct LogScoreSheet: View {
     @State private var note = ""
     @State private var busy = false
     @State private var error: String?
+    @State private var rounds: [EditRound] = []
+    @State private var by: WodPlan.SplitBy = .round
+    @State private var ready = false
+
+    struct EditSet: Identifiable {
+        let id = UUID()
+        var name: String
+        var target: String
+        var time: Double?
+        var actual = ""
+    }
+    struct EditRound: Identifiable {
+        let id = UUID()
+        var time = ""
+        var sets: [EditSet]
+    }
 
     private var score: Double? { WodScore.parse(scoreType, text, capped: capped) }
+    private var splits: [Double] { prefill?.splits ?? [] }
 
     var body: some View {
         NavigationStack {
@@ -43,6 +64,57 @@ struct LogScoreSheet: View {
                     DatePicker("Date", selection: $day, in: ...Date.now, displayedComponents: .date)
                     TextField("Note (optional)", text: $note, axis: .vertical)
                 }
+                if !splits.isEmpty, let plan, !plan.rounds.isEmpty {
+                    Section {
+                        Picker("Splits were", selection: $by) {
+                            Text("Rounds").tag(WodPlan.SplitBy.round)
+                            Text("Movements").tag(WodPlan.SplitBy.set)
+                        }
+                        .pickerStyle(.segmented)
+                    } header: {
+                        Text("\(splits.count) split\(splits.count == 1 ? "" : "s") from the timer")
+                    }
+                }
+                ForEach($rounds) { $round in
+                    let i = rounds.firstIndex { $0.id == round.id } ?? 0
+                    Section {
+                        ForEach($round.sets) { $set in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(set.name)
+                                    Text([set.target, set.time.map { WodClock.text($0, tenths: true) }].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                TextField(placeholder(set.target), text: $set.actual)
+                                    .multilineTextAlignment(.trailing)
+                                    .frame(maxWidth: 110)
+                                    .accessibilityLabel("\(set.name), round \(i + 1), what you did")
+                            }
+                        }
+                    } header: {
+                        HStack {
+                            Text("Round \(i + 1)")
+                            Spacer()
+                            TextField("time", text: $round.time)
+                                .keyboardType(.numbersAndPunctuation)
+                                .multilineTextAlignment(.trailing)
+                                .font(.body.monospacedDigit())
+                                .frame(maxWidth: 100)
+                                .accessibilityLabel("Round \(i + 1) time")
+                        }
+                        .textCase(nil)
+                    } footer: {
+                        if i == rounds.count - 1 {
+                            Text("Round times are optional (mm:ss). Leave a movement blank if you did it as written.")
+                        }
+                    }
+                }
+                if let plan, plan.repeats || plan.rounds.isEmpty, !rounds.isEmpty || plan.repeats {
+                    Section {
+                        Button("Add round") { addRound() }
+                    }
+                }
                 if let error {
                     Section { Text(error).foregroundStyle(.red) }
                 }
@@ -55,8 +127,10 @@ struct LogScoreSheet: View {
                     Button("Save") { submit() }.disabled(score == nil || busy)
                 }
             }
+            .onAppear(perform: setUp)
+            .onChange(of: by) { remap() }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents(plan?.rounds.isEmpty == false ? [.large] : [.medium, .large])
     }
 
     private var capLabel: String {
@@ -64,13 +138,87 @@ struct LogScoreSheet: View {
         return "Didn't finish in the time cap"
     }
 
+    private func placeholder(_ target: String) -> String {
+        let first = target.split(whereSeparator: { " ,@".contains($0) }).first.map(String.init) ?? ""
+        return first.isEmpty ? "done" : first
+    }
+
+    private func setUp() {
+        guard !ready, let plan else { return }
+        ready = true
+        by = prefill?.by ?? plan.defaultSplitBy
+        remap()
+        guard let r = prefill else { return }
+        let m = plan.map(splits: r.splits, by: r.by)
+        switch scoreType {
+        case "time":
+            if r.hitLimit && r.timer.mode == .down {
+                capped = true
+                text = m.reps > 0 ? "\(m.reps)" : ""
+            } else {
+                text = WodClock.text(r.elapsed, tenths: true)
+            }
+        case "rounds_reps" where plan.repeats:
+            let perRound = plan.rounds.first?.reduce(0) { $0 + $1.reps } ?? 0
+            let extra = max(0, m.reps - m.doneRounds * perRound)
+            text = "\(m.doneRounds)" + (extra > 0 ? "+\(extra)" : "")
+        case "reps" where m.reps > 0:
+            text = "\(m.reps)"
+        default: break
+        }
+    }
+
+    /// Round and movement times from the splits; keeps whatever was typed as "actual".
+    private func remap() {
+        guard let plan, !plan.rounds.isEmpty || !splits.isEmpty else { return }
+        let m = plan.map(splits: splits, by: by)
+        let old = rounds
+        rounds = m.rounds.enumerated().map { i, r in
+            EditRound(
+                time: r.time.map { WodClock.text($0, tenths: true) } ?? (splits.isEmpty && i < old.count ? old[i].time : ""),
+                sets: r.sets.enumerated().map { j, s in
+                    EditSet(name: s.set.name, target: s.set.target, time: s.time,
+                            actual: i < old.count && j < old[i].sets.count ? old[i].sets[j].actual : "")
+                }
+            )
+        }
+        // Rounds added by hand beyond what the splits cover stay.
+        if old.count > rounds.count { rounds.append(contentsOf: old[rounds.count...].map { r in
+            EditRound(time: "", sets: r.sets.map { EditSet(name: $0.name, target: $0.target, actual: $0.actual) })
+        }) }
+    }
+
+    private func addRound() {
+        guard let plan else { return }
+        let sets = plan.round(rounds.count)
+        rounds.append(EditRound(sets: sets.map { EditSet(name: $0.name, target: $0.target) }))
+    }
+
+    private var detail: WodDetail? {
+        guard !rounds.isEmpty || !splits.isEmpty else { return nil }
+        let out = rounds.map { r in
+            WodDetail.Round(
+                time: WodScore.parse("time", r.time),
+                sets: r.sets.map { s in
+                    let a = s.actual.trimmingCharacters(in: .whitespaces)
+                    return WodDetail.SetDetail(name: s.name, target: s.target, actual: a.isEmpty ? nil : String(a.prefix(60)), time: s.time)
+                }
+            )
+        }
+        let any = !splits.isEmpty || out.contains { $0.time != nil || $0.sets.contains { $0.actual != nil } }
+        guard any else { return nil }
+        return WodDetail(rounds: out, splits: splits.isEmpty ? nil : splits,
+                         splitBy: splits.isEmpty ? nil : by.rawValue, timer: prefill?.timer.label)
+    }
+
     private func submit() {
         guard let score else { return }
         busy = true
         error = nil
+        let detail = self.detail
         Task {
             do {
-                try await save(score, rx, day, note.trimmingCharacters(in: .whitespacesAndNewlines))
+                try await save(score, rx, day, note.trimmingCharacters(in: .whitespacesAndNewlines), detail)
                 dismiss()
             } catch {
                 self.error = error.localizedDescription

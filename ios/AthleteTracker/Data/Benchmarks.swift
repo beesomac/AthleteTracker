@@ -56,9 +56,11 @@ nonisolated struct ResultRow: Decodable, Sendable, Identifiable {
     let rx: Bool
     let performedOn: String?
     let note: String?
+    /// Round by round (supabase/011); nil on older scores or databases.
+    var detail: WodDetail? = nil
 
     enum CodingKeys: String, CodingKey {
-        case id, score, rx, note
+        case id, score, rx, note, detail
         case wodId = "wod_id"
         case performedOn = "performed_on"
     }
@@ -92,13 +94,20 @@ nonisolated struct LibraryWod: Decodable, Sendable, Identifiable, Hashable {
     let description: String?
     let movements: [Movement]
     let cap: Int?              // time cap in seconds, for "for time" WODs
+    let roundSets: [[WodSet]]? // each round's movements and reps (21.1: 1 wall walk + 10 DUs, …)
+    let roundRepeat: Bool      // an AMRAP: the round repeats
+    let timer: TimerSpec?      // how the WOD timer starts
 
     nonisolated struct Movement: Decodable, Sendable, Hashable {
         let name: String
         let target: String?
     }
 
-    enum CodingKeys: String, CodingKey { case id, name, group, year, primary, format, score, description, movements, cap }
+    enum CodingKeys: String, CodingKey {
+        case id, name, group, year, primary, format, score, description, movements, cap, timer
+        case roundSets = "round_sets"
+        case roundRepeat = "round_repeat"
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -111,6 +120,10 @@ nonisolated struct LibraryWod: Decodable, Sendable, Identifiable, Hashable {
         score = (try? c.decode(String.self, forKey: .score)) ?? "time"
         description = try? c.decode(String.self, forKey: .description)
         movements = (try? c.decode([Movement].self, forKey: .movements)) ?? []
+        cap = try? c.decode(Int.self, forKey: .cap)
+        roundSets = try? c.decode([[WodSet]].self, forKey: .roundSets)
+        roundRepeat = (try? c.decode(Bool.self, forKey: .roundRepeat)) ?? false
+        timer = try? c.decode(TimerSpec.self, forKey: .timer)
     }
 }
 

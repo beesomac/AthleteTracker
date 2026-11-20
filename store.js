@@ -62,6 +62,14 @@
       }
     }
 
+    // The athlete's WOD scores, with round detail when 011 has run (older databases: without).
+    async function myResultsQuery() {
+      const cols = "id, wod_id, athlete_email, score, rx, performed_on, note, hidden, created_at";
+      const r = await scoped(sb.from("wod_results").select(cols + ", detail"));
+      if (!r.error || !/detail/.test(r.error.message || "")) return r;
+      return scoped(sb.from("wod_results").select(cols));
+    }
+
     async function loadAll() {
       const [t, n, f, m, p, w, b, nt, mr] = await Promise.all([
         scoped(sb.from("ticks").select("*")),
@@ -74,7 +82,7 @@
         // 007: your own notifications (the signed-in person's, whichever athlete a trainer is viewing).
         info.v2 ? sb.from("notifications").select("*").eq("recipient_email", (email || "").toLowerCase()).order("created_at", { ascending: false }).limit(60) : null,
         // Every WOD score of the athlete being viewed, for "you've done this before".
-        info.v2 ? scoped(sb.from("wod_results").select("id, wod_id, athlete_email, score, rx, performed_on, note, hidden, created_at")) : null,
+        info.v2 ? myResultsQuery() : null,
       ]);
       if (t.error) throw t.error;
       if (n.error) throw n.error;
@@ -210,11 +218,18 @@
         if (listener) listener(await loadAll());
       },
       // An athlete logging their own WOD score.
+      // r.detail (optional): rounds and timer splits (supabase/011). Before 011 has run, the
+      // round times go into the note instead so they aren't lost.
       async addResult(r) {
-        const { error } = await sb.from("wod_results").insert({
+        const row = {
           wod_id: r.wod, athlete_email: (email || "").toLowerCase(), score: r.score, rx: !!r.rx,
           performed_on: r.on || undefined, note: r.note || null, entered_by_email: email,
-        });
+        };
+        let { error } = await sb.from("wod_results").insert(r.detail ? Object.assign({ detail: r.detail }, row) : row);
+        if (error && r.detail && /detail/.test(error.message || "")) {
+          const extra = r.detailText ? (row.note ? row.note + " · " : "") + r.detailText : row.note;
+          ({ error } = await sb.from("wod_results").insert(Object.assign({}, row, { note: extra ? extra.slice(0, 500) : null })));
+        }
         if (error) throw error;
         // The board is ranked in the database, so fetch it again rather than waiting for the live update.
         if (listener) listener(await loadAll());
