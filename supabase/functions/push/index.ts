@@ -60,7 +60,9 @@ function p8Bytes(raw: string): Uint8Array {
 async function apnsJwt(): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   if (cached && now - cached.at < 40 * 60) return cached.jwt;
-  const der = p8Bytes(PRIVATE_KEY);
+  let der = p8Bytes(PRIVATE_KEY);
+  // Pasted twice (or with extra text after it)? Keep just the first key: its own header says how long it is.
+  if (der[0] === 0x30 && der[1] === 0x81 && der.length > der[2] + 3) der = der.slice(0, der[2] + 3);
   let key: CryptoKey;
   try {
     key = await crypto.subtle.importKey("pkcs8", der, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
