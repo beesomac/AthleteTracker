@@ -183,3 +183,18 @@ label.file input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .wod-desc{font-size:13.5px;line-height:1.45}
 .wod-card .row{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
 .wod-card .btn{font-size:12.5px;padding:5px 10px}
+
+/* "Add to leaderboard?" and board members (007). */
+.modal-back{position:fixed;inset:0;background:rgba(10,14,20,.45);display:grid;place-items:center;padding:16px;z-index:50}
+.modal{background:var(--surface);color:var(--ink);border-radius:14px;max-width:520px;width:100%;max-height:calc(100vh - 32px);overflow:auto;padding:18px;display:grid;gap:12px;box-shadow:0 20px 50px rgba(0,0,0,.25)}
+.modal h3{margin:0;font:600 22px var(--display)}
+.ask-item{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:0;display:grid;gap:6px}
+.ask-item legend{font:600 17px var(--display);padding:0 4px}
+.ask-opt{display:flex;gap:8px;align-items:flex-start;font-size:14px;cursor:pointer}
+.ask-opt input{margin-top:3px}
+.ask-hist{font-size:13px;background:var(--info-soft);color:var(--info);border-radius:8px;padding:6px 9px;display:grid;gap:2px}
+.modal .row{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+.wod-info{font-size:12.5px}
+.board-members{margin:8px 0}
+.board-members .chip{display:inline-flex;align-items:center;gap:4px}
+.board-members .x{border:0;background:none;color:inherit;cursor:pointer;font-size:11px;padding:0 2px}

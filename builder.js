@@ -216,6 +216,7 @@
         </span>
       </div>
       ${b.note != null ? `<textarea class="bnote" data-bf="note" rows="${Math.min(8, String(b.note).split("\n").length + 1)}" aria-label="Block note" placeholder="Shown to the athlete above this block">${esc(b.note)}</textarea>` : ""}
+      ${(b.wod || b.board) && ui.wodInfo ? `<div class="wod-info extra">${ui.wodInfo(b)}</div>` : ""}
       <ol class="drop" data-b="${bi}">${exs.map((ex, ei) => exHTML(ex, bi, ei, ui)).join("")}${exs.length ? "" : `<li class="drop-hint">Drag exercises here</li>`}</ol>
       <div class="bblock-foot"><button type="button" class="link" data-bact="new-ex">+ New exercise</button>${b.note == null ? `<button type="button" class="link" data-bact="add-note">+ Note</button>` : ""}${isTarget ? `<span class="extra">+ in the library adds here</span>` : `<button type="button" class="link" data-bact="target">Add library picks here</button>`}</div>
     </section>`;

@@ -13,7 +13,8 @@
     login: {}, athleteFilter: "", notesFilter: "open", confirm: null,
     editingMember: null, edit: null, reply: null, editingWod: false, fileIds: null,
     fileSessions: [], librarySeed: null, wodSeed: null, wodDraft: null, pendingWod: null,
-    builder: { query: "", cat: "", target: null, open: new Set(), confirm: null, libTab: "ex", wodGroup: "open" },
+    boardMembers: null, boardAsk: null,   // boardMembers null = 007_wod_boards.sql not run yet
+    builder: { query: "", cat: "", target: null, open: new Set(), confirm: null, libTab: "ex", wodGroup: "open", wodInfo: null },
     libPage: { query: "", cat: "", wodGroup: "open", open: null },
   };
   const PB = window.ProgramBuilder;
@@ -35,6 +36,31 @@
     const m = state.members.find((x) => x.email === String(email).toLowerCase());
     return m && m.display_name ? m.display_name : String(email).split("@")[0];
   }
+  // ─── WOD boards and history (007) ───────────────────────────────────────────────────────
+  const boardsReady = () => state.boardMembers !== null;
+  const libWod = (id) => (state.wodSeed && state.wodSeed.wods.find((w) => w.id === id)) || null;
+  // Leaderboards that are this WOD: same library id, or the same name.
+  function boardsFor(libId, name) {
+    const n = String(name || "").trim().toLowerCase();
+    return state.wods.filter((w) => (libId && w.library_id === libId) || (n && w.name.trim().toLowerCase() === n));
+  }
+  // An athlete's earlier scores on this WOD, newest first, across all its boards.
+  function historyFor(email, libId, name) {
+    const ids = new Set(boardsFor(libId, name).map((w) => w.id));
+    return state.results.filter((r) => ids.has(r.wod_id) && r.athlete_email === email && !r.hidden)
+      .map((r) => Object.assign({ type: (state.wods.find((w) => w.id === r.wod_id) || {}).score_type }, r))
+      .sort((a, b) => String(b.performed_on).localeCompare(String(a.performed_on)));
+  }
+  function bestOf(rows) { return rows.length ? W.rank(rows[0].type, rows.slice())[0] : null; }
+  const scoreText = (r) => `${W.format(r.type, r.score)}${r.rx ? " Rx" : " scaled"}`;
+  function historyLine(rows) {
+    if (!rows.length) return "";
+    const last = rows[0], best = bestOf(rows);
+    return `Last ${scoreText(last)} on ${fmtDate(last.performed_on)}${rows.length > 1 && best !== last ? ` · best ${scoreText(best)} on ${fmtDate(best.performed_on)}` : ""}${rows.length > 1 ? ` · done ${rows.length}×` : ""}`;
+  }
+  const isWodBlock = (b) => b && (b.wod || b.board) && Array.isArray(b.exercises) && b.exercises.length;
+  function programAthletes(email) { return email ? [email] : activeAthletes().map((a) => a.email); }
+
   function programTitle(sid) {
     const p = state.programs.find((x) => x.id === sid);
     return p ? (p.body && p.body.short ? p.body.short + " · " : "") + p.title : sid;
@@ -65,6 +91,9 @@
     ]);
     for (const x of [m, p, n, f, w, r]) if (x.error) throw x.error;
     Object.assign(state, { members: m.data, programs: p.data, notes: n.data, finishes: f.data, wods: w.data, results: r.data, loaded: true });
+    // Board members come with 007_wod_boards.sql; before that the console works as it did.
+    const bm = await sb.from("wod_board_members").select("*");
+    state.boardMembers = bm.error ? null : bm.data;
   }
   let reloadTimer = null, pendingRender = false;
   function scheduleReload() {
@@ -307,6 +336,18 @@
     if (opts.flashBlock != null) { const el = root.querySelector(`.bblock[data-b="${opts.flashBlock}"]`); if (el) { el.classList.add("just-added"); el.scrollIntoView({ block: "nearest" }); } }
     if (opts.flashRow) { const el = root.querySelector(`.bex[data-b="${opts.flashRow[0]}"][data-e="${opts.flashRow[1]}"]`); if (el) { el.classList.add("just-added"); el.scrollIntoView({ block: "nearest" }); } }
   }
+  // Under a WOD block in the builder: its leaderboard, and how the athlete did before.
+  state.builder.wodInfo = (b) => {
+    if (!state.edit) return "";
+    const parts = [];
+    const board = b.board && state.wods.find((w) => w.id === b.board);
+    parts.push(board ? `Leaderboard: <a href="#board-${esc(board.id)}">${esc(board.name)}</a>` : b.board === null ? "No leaderboard" : "You'll be asked about a leaderboard when you save");
+    for (const email of state.edit.athlete ? [state.edit.athlete] : []) {
+      const h = historyFor(email, b.wod, b.name);
+      parts.push(h.length ? `<b>${esc(nameOf(email))} has done this before.</b> ${esc(historyLine(h))}` : `First time for ${esc(nameOf(email))}`);
+    }
+    return parts.join(" · ");
+  };
   PB.mount(app, {
     body: () => state.edit.body,
     lib: () => library(),
@@ -318,6 +359,78 @@
       refreshCheck();
     },
   });
+
+  // ─── "Add to leaderboard?" ─────────────────────────────────────────────────────────────
+  function openBoardAsk(blockIdx, athleteEmail) {
+    const body = state.edit.body;
+    state.boardAsk = {
+      athletes: programAthletes(athleteEmail),
+      items: blockIdx.filter((i) => i >= 0).map((bi) => {
+        const b = body.blocks[bi], boards = boardsFor(b.wod, b.name).filter((w) => w.status !== "closed");
+        return { bi, choice: boards.length ? boards[0].id : "new" };
+      }),
+    };
+    render();
+    const d = $(".board-ask"); if (d) d.focus();
+  }
+  function boardAskHTML() {
+    const a = state.boardAsk, body = state.edit && state.edit.body; if (!a || !body) return "";
+    const who = a.athletes.length === 1 ? nameOf(a.athletes[0]) : a.athletes.length ? `All ${a.athletes.length} active athletes` : "Nobody";
+    const items = a.items.map((it, k) => {
+      const b = body.blocks[it.bi], boards = boardsFor(b.wod, b.name);
+      const hist = a.athletes.map((em) => ({ em, h: historyFor(em, b.wod, b.name) })).filter((x) => x.h.length);
+      const opt = (val, label, extra) => `<label class="ask-opt"><input type="radio" name="ask-${k}" value="${esc(val)}" data-ask="${k}" ${it.choice === val ? "checked" : ""}><span>${label}${extra ? ` <span class="extra">${extra}</span>` : ""}</span></label>`;
+      return `<fieldset class="ask-item"><legend>${esc(b.name || "WOD")}</legend>
+        ${hist.length ? `<div class="ask-hist">${hist.map((x) => `<div><b>${esc(nameOf(x.em))} has done this before.</b> ${esc(historyLine(x.h))}</div>`).join("")}</div>` : ""}
+        ${boards.map((w) => opt(w.id, `Add to the <b>${esc(w.name)}</b> board`, `${w.status === "closed" ? "closed · " : w.status === "draft" ? "draft · " : ""}${state.results.filter((r) => r.wod_id === w.id).length} scores${w.wod_date ? " · " + esc(fmtDate(w.wod_date)) : ""}`)).join("")}
+        ${opt("new", boards.length ? "Start a new board for this date" : `Start a leaderboard for <b>${esc(b.name)}</b>`, "")}
+        ${opt("none", "No leaderboard", "")}
+      </fieldset>`;
+    }).join("");
+    return `<div class="modal-back"><div class="modal board-ask" role="dialog" aria-modal="true" aria-labelledby="ask-title" tabindex="-1">
+      <h3 id="ask-title">Add to leaderboard?</h3>
+      <div class="extra">${esc(who)} ${a.athletes.length === 1 ? "goes" : "go"} on the board. Everyone on a board gets a notification when someone adds a score.${boardsReady() ? "" : " <b>Run supabase/007_wod_boards.sql to turn on board members and notifications;</b> until then the board is just linked."}</div>
+      ${items}
+      <div class="row"><button type="button" class="btn" data-act="ask-cancel">Back to editing</button><button type="button" class="btn primary" data-act="ask-confirm">Save program</button></div>
+    </div></div>`;
+  }
+  async function confirmBoardAsk() {
+    const a = state.boardAsk, e = state.edit; if (!a || !e) return;
+    for (const it of a.items) {
+      const b = e.body.blocks[it.bi]; let id = null;
+      if (it.choice === "new") {
+        const lw = libWod(b.wod) || {};
+        const row = { name: b.name || lw.name || "WOD", description: b.note || lw.description || null, score_type: lw.score || "time", time_cap_seconds: lw.cap || null, wod_date: e.date || null, status: "open", created_by_email: state.me };
+        if (boardsReady() && b.wod) row.library_id = b.wod;
+        const { data, error } = await sb.from("wods").insert(row).select().single();
+        if (error) return failed(error);
+        id = data.id;
+      } else if (it.choice !== "none") id = it.choice;
+      b.board = id;
+      if (id && boardsReady() && a.athletes.length) {
+        const { error } = await sb.from("wod_board_members").upsert(a.athletes.map((em) => ({ wod_id: id, athlete_email: em, added_by_email: state.me })), { onConflict: "wod_id,athlete_email", ignoreDuplicates: true });
+        if (error) return failed(error);
+      }
+    }
+    e.text = JSON.stringify(e.body, null, 1);
+    state.boardAsk = null; render();
+    const f = $("#program-form"); if (f) f.requestSubmit();
+  }
+  // Published with a WOD an athlete has done before: tell them, with how they did. Once per
+  // athlete, program and WOD (a unique index in 007), however often the program is saved.
+  async function notifyWodAgain(pid, row) {
+    if (!boardsReady()) return;
+    const label = (row.body.short ? row.body.short + " · " : "") + (row.title || "your program");
+    const rows = [];
+    for (const b of row.body.blocks.filter(isWodBlock)) for (const em of programAthletes(row.athlete_email)) {
+      const h = historyFor(em, b.wod, b.name); if (!h.length) continue;
+      rows.push({ recipient_email: em, kind: "wod_again", title: `${b.name} is back in your program`, body: `${label} on ${fmtDate(row.date)}. ${historyLine(h)}.`, session_id: pid, ref: b.wod || String(b.name).toLowerCase(), wod_id: b.board || null });
+    }
+    if (rows.length) {
+      const { error } = await sb.from("notifications").upsert(rows, { onConflict: "recipient_email,kind,session_id,ref", ignoreDuplicates: true });
+      if (error) console.warn(error); else flash(`Told ${rows.length === 1 ? nameOf(rows[0].recipient_email) : rows.length + " athletes"} how they did on this WOD before.`, "ok");
+    }
+  }
 
   function renderProgram(v) {
     if (!state.edit || state.edit.id !== v.id) if (!startEdit(v.id)) return `<div class="empty"><strong>Program not found</strong><span><a href="#programs">Back to programs</a></span></div>`;
@@ -476,6 +589,14 @@
         <label class="check"><input type="checkbox" name="rx" checked> Rx</label>
         <label class="full">Note<input name="note" maxlength="500" placeholder="Optional"></label>
         <div class="row"><button class="btn primary">Add score</button></div></form></section></div>`;
+    if (boardsReady()) {
+      const mem = state.boardMembers.filter((m) => m.wod_id === w.id);
+      const out = athletes().filter((a) => !mem.some((m) => m.athlete_email === a.email));
+      html += `<section class="card"><h3>On this board <span class="extra">(${mem.length})</span></h3>
+        <div class="extra">They get a notification in their training log whenever someone adds a score. Athletes join when the WOD goes into their program, or when they log a score.</div>
+        <div class="chips board-members">${mem.map((m) => `<span class="chip info">${esc(nameOf(m.athlete_email))} <button type="button" class="x" data-act="board-del-member" data-id="${esc(w.id)}" data-email="${esc(m.athlete_email)}" aria-label="Take ${esc(nameOf(m.athlete_email))} off the board">✕</button></span>`).join("") || `<span class="extra">Nobody yet.</span>`}</div>
+        ${out.length ? `<div class="row"><select id="board-member-pick" aria-label="Athlete">${out.map((a) => `<option value="${esc(a.email)}">${esc(a.display_name || a.email)}</option>`).join("")}</select><button type="button" class="btn" data-act="board-add-member" data-id="${esc(w.id)}">Add to board</button></div>` : ""}</section>`;
+    }
     html += `<section class="card table-card"><h3>Every score <span class="extra">(${all.length})</span></h3>`;
     if (all.length) {
       html += `<table class="grid"><thead><tr><th>Athlete</th><th>Score</th><th>Rx</th><th>Date</th><th>Note</th><th>Entered by</th><th></th></tr></thead><tbody>`;
@@ -517,7 +638,7 @@
     else if (state.role !== "trainer") html = `<div class="empty"><strong>Not on the list</strong><span>${esc(state.me)} isn't set up as a trainer. <button class="signout" data-act="signout">Sign out</button></span></div>`;
     else if (!state.loaded) html = `<div class="hero"><div class="eyebrow">Loading</div><h2>Opening the console…</h2></div><div class="skeleton"></div>`;
     else if (v.kind === "programs") html = renderPrograms();
-    else if (v.kind === "program") html = renderProgram(v);
+    else if (v.kind === "program") html = renderProgram(v) + boardAskHTML();
     else if (v.kind === "feedback") html = renderFeedback();
     else if (v.kind === "library") html = renderLibrary(v);
     else if (v.kind === "boards") html = renderBoards();
@@ -561,8 +682,15 @@
         if (chk.errors.length) { flash("Fix the problems in the JSON first."); return; }
         const body = withoutEmptyBlocks(chk.body); delete body.id; delete body.date; delete body.title;
         const row = { athlete_email: val(f, "athlete") || null, date: val(f, "date"), title: val(f, "title"), published: checked(f, "published"), body, created_by_email: state.me, updated_at: new Date().toISOString() };
-        const q = e.id ? sb.from("programs").update(row).eq("id", e.id) : sb.from("programs").insert(Object.assign({ id: newProgramId(row.date) }, row));
-        if (await run(q, "Program saved.")) { state.edit = null; location.hash = "programs"; }
+        // A WOD that hasn't been asked about yet: "Add to leaderboard?" first, then save.
+        const ask = chk.body.blocks.map((b, bi) => (isWodBlock(b) && !("board" in b) ? bi : -1)).filter((bi) => bi >= 0);
+        if (ask.length) { setEditText(e.text); openBoardAsk(ask, row.athlete_email); return; }
+        const pid = e.id || newProgramId(row.date);
+        const q = e.id ? sb.from("programs").update(row).eq("id", e.id) : sb.from("programs").insert(Object.assign({ id: pid }, row));
+        if (await run(q, "Program saved.")) {
+          state.edit = null; location.hash = "programs";
+          if (row.published) await notifyWodAgain(pid, row);
+        }
       } else if (f.id === "import-files") {
         await importFiles(val(f, "athlete"), checked(f, "publish"));
       } else if (f.classList.contains("reply-form")) {
@@ -576,6 +704,7 @@
         const cap = capText ? W.parse("time", capText) : null;
         if (capText && cap == null) { flash("Time cap should look like 12:00."); return; }
         const row = { name: val(f, "name"), score_type: val(f, "score_type"), time_cap_seconds: cap, wod_date: val(f, "date") || null, status: val(f, "status"), description: val(f, "description") || null };
+        if (f.id === "wod-add" && state.wodDraft && state.wodDraft.library_id && boardsReady()) row.library_id = state.wodDraft.library_id;
         if (f.id === "wod-add") {
           const { data, error } = await sb.from("wods").insert(Object.assign({ created_by_email: state.me }, row)).select().single();
           if (error) return failed(error);
@@ -629,6 +758,7 @@
   });
   app.addEventListener("change", async (ev) => {
     const el = ev.target;
+    if (el.dataset.ask != null && state.boardAsk) { state.boardAsk.items[Number(el.dataset.ask)].choice = el.value; return; }
     if (el.classList.contains("filter-athlete")) { state.athleteFilter = el.value; render(); return; }
     if (el.id === "program-file" && el.files && el.files[0]) {
       const text = await el.files[0].text();
@@ -682,12 +812,20 @@
       const n = state.notes.find((x) => x.id === id); if (!n) return;
       await run(sb.from("notes").update({ reviewed: !n.reviewed, reviewed_by_email: n.reviewed ? null : state.me }).eq("id", id));
     } else if (act === "reply") { state.reply = id || null; render(); const t = $(".reply-form textarea"); if (t) t.focus(); }
+    else if (act === "ask-cancel") { state.boardAsk = null; render(); }
+    else if (act === "ask-confirm") { btn.disabled = true; await confirmBoardAsk(); }
+    else if (act === "board-add-member") {
+      const sel = $("#board-member-pick"); if (!sel || !sel.value) return;
+      await run(sb.from("wod_board_members").upsert({ wod_id: id, athlete_email: sel.value, added_by_email: state.me }, { onConflict: "wod_id,athlete_email", ignoreDuplicates: true }), "Added to the board.");
+    } else if (act === "board-del-member") {
+      await run(sb.from("wod_board_members").delete().eq("wod_id", id).eq("athlete_email", btn.dataset.email));
+    }
     else if (act === "libp-cat") { state.libPage.cat = btn.dataset.c; render(); }
     else if (act === "libp-group") { state.libPage.wodGroup = btn.dataset.g; state.libPage.query = ""; render(); }
     else if (act === "wod-to-program") { state.pendingWod = id; state.edit = null; if (location.hash === "#program-new") render(); else location.hash = "program-new"; }
     else if (act === "wod-to-board") {
       const w = state.wodSeed && state.wodSeed.wods.find((x) => x.id === id); if (!w) return;
-      state.wodDraft = { name: w.name, score_type: w.score, time_cap_seconds: w.cap || null, status: "draft", description: w.description };
+      state.wodDraft = { name: w.name, score_type: w.score, time_cap_seconds: w.cap || null, status: "draft", description: w.description, library_id: w.id };
       location.hash = "boards"; setTimeout(() => { const el = $("#new-wod"); if (el) el.scrollIntoView({ block: "start" }); }, 0);
     }
     else if (act === "wod-status") { await run(sb.from("wods").update({ status: btn.dataset.s }).eq("id", id)); }
@@ -709,6 +847,7 @@
     state.confirm = null; state.editingMember = null; state.reply = null; state.editingWod = false;
     if (view().kind !== "program") state.edit = null;
     if (view().kind !== "boards") state.wodDraft = null;
+    state.boardAsk = null;
     render(); window.scrollTo(0, 0);
   });
 
@@ -750,7 +889,7 @@
     });
     if (channel) sb.removeChannel(channel);
     channel = sb.channel("trainer-console");
-    for (const table of ["members", "programs", "notes", "session_finishes", "wods", "wod_results", "ticks"]) channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, scheduleReload);
+    for (const table of ["members", "programs", "notes", "session_finishes", "wods", "wod_results", "ticks", "wod_board_members"]) channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, scheduleReload);
     channel.subscribe();
     document.addEventListener("visibilitychange", () => { if (!document.hidden) scheduleReload(); });
     render();

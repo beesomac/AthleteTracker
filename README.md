@@ -62,6 +62,8 @@ Then run `supabase/003_lift_maxes.sql`, and `supabase/004_trainer_console.sql` f
 
 To train as an athlete yourself on your trainer email, run `supabase/006_trainer_also_athlete.sql`, then tick **Trainer also trains** on your row in the console's Athletes tab. You then show up with the athletes, and can pick your own log on the athlete site.
 
+For leaderboards that athletes join from their programs, run `supabase/007_wod_boards.sql`. Then, when you save a program with a WOD in it, the console asks **Add to leaderboard?**: pick an existing board for that WOD, start a new one, or none. The program's athlete (or every active athlete, for an "All athletes" program) goes on the board, and everyone on a board gets a notification in their training log (the bell in the header) whenever someone adds a score. Logging a score also puts you on the board. When a published program has a WOD the athlete has done before, they get a notification with their last and best score, and the session shows their earlier results above the WOD with a **Log score** button. Board members can be added or removed on each board's page. Before 007 runs, the pop-up still links the board but nobody is added and no notifications are sent.
+
 After 004, add and rename people in the console (Athletes). Before 004, only the emails in `allowed_emails` can see or change anything; to add someone, run `insert into allowed_emails values ('their@email.com');` in the SQL Editor.
 
 ### Data for other apps (iOS)
@@ -77,6 +79,8 @@ Everything lives in Supabase, readable with the anon key plus a signed-in user, 
 | `ticks`, `notes`, `session_finishes`, `lift_maxes` | Per-athlete feedback, keyed by `athlete_email` + `session_id` (= program `id`) |
 | `wods`, `wod_board()` | WODs and their ranked boards (names only, best score per athlete). Scores: seconds for time, reps, kg, or rounds × 1000 + reps; `wod.js` formats them |
 | `wod_results` | An athlete's own scores; insert one to log a score on an open WOD |
+| `wod_board_members` | (007) Who is on each leaderboard; an athlete can read their own rows |
+| `notifications` | (007) Each person's inbox: `kind` `score`, `board_added` or `wod_again`, `title`, `body`, `read_at`; read and mark your own |
 
 ### 2. Hosting (Vercel)
 
