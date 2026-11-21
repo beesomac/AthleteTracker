@@ -72,8 +72,12 @@ final class Push {
     /// A notification was tapped. MainTabView opens it (and marks it read) once the app is signed in
     /// and loaded, which on a cold start is a moment after this runs.
     func opened(id: String?, kind: String?, wodId: String?) {
+        print("Push: tapped id=\(id ?? "-") kind=\(kind ?? "-") wod=\(wodId ?? "-")")
         route = Route(id: id, kind: kind, wodId: wodId)
         NotificationCenter.default.post(name: Self.tapped, object: nil)
+        // Mark it read straight away when we're already signed in (resumed from the background);
+        // on a cold start MainTabView does it again once the session is back.
+        if let id { Task { await markRead(id) } }
     }
 
     /// Same as clicking it in the web bell. Needs the signed-in session, so it runs from MainTabView.
@@ -115,6 +119,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
                                             didReceive response: UNNotificationResponse) async {
         let info = response.notification.request.content.userInfo
+        print("Push: didReceive \(info.keys.map { "\($0)" }.sorted())")
         let id = info["id"] as? String
         let kind = info["kind"] as? String
         let wodId = info["wod_id"] as? String

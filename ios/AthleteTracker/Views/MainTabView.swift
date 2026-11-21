@@ -33,6 +33,7 @@ struct MainTabView: View {
     /// restored when the tap arrives, and switching straight away gets undone.
     private func follow(_ route: Push.Route?) {
         guard let route else { return }
+        print("Push: following kind=\(route.kind ?? "-") wod=\(route.wodId ?? "-")")
         Push.shared.route = nil
         // Switch now (enough when the app was already running), and again after the reload below
         // in case a cold start restores the old tab in between.
@@ -48,6 +49,9 @@ struct MainTabView: View {
             if let wodId = route.wodId?.lowercased(),
                let wod = model.wods.first(where: { $0.id.lowercased() == wodId }) {
                 boardPath = [wod]
+                print("Push: opened board \(wod.name)")
+            } else {
+                print("Push: board \(route.wodId ?? "-") not in \(model.wods.count) boards")
             }
         }
     }
