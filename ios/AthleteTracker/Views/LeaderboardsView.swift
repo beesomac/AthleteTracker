@@ -3,12 +3,14 @@ import SwiftUI
 /// Every leaderboard the trainer has opened: open ones first, then closed.
 struct LeaderboardsView: View {
     @Environment(AppModel.self) private var model
+    /// The open board, if any. MainTabView sets it when a push is tapped.
+    @Binding var path: [WodRow]
 
     private var open: [WodRow] { model.wods.filter(\.isOpen) }
     private var closed: [WodRow] { model.wods.filter { !$0.isOpen } }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 if !open.isEmpty {
                     Section("Open") { ForEach(open) { row($0) } }

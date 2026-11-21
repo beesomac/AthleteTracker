@@ -4,6 +4,8 @@ import SwiftUI
 struct MainTabView: View {
     enum TabID: String { case program, leaderboards, benchmarks }
     @SceneStorage("tab") private var tab: TabID = .program
+    @Environment(AppModel.self) private var model
+    @State private var boardPath: [WodRow] = []
 
     var body: some View {
         TabView(selection: $tab) {
@@ -11,21 +13,33 @@ struct MainTabView: View {
                 SessionsListView()
             }
             Tab("Leaderboards", systemImage: "trophy", value: .leaderboards) {
-                LeaderboardsView()
+                LeaderboardsView(path: $boardPath)
             }
             Tab("Benchmarks", systemImage: "chart.bar.xaxis", value: .benchmarks) {
                 BenchmarksView()
             }
         }
-        .onAppear(perform: openFromPush)
-        .onChange(of: Push.shared.openedKind) { openFromPush() }
+        .onAppear { follow(Push.shared.route) }
+        .onChange(of: Push.shared.route) { _, route in follow(route) }
     }
 
-    /// A tapped push: scores and board invites open Leaderboards, "done this before" opens Program.
-    private func openFromPush() {
-        guard let kind = Push.shared.openedKind else { return }
-        Push.shared.openedKind = nil
-        tab = kind == "wod_again" ? .program : .leaderboards
+    /// A tapped push: a score or board invite opens that leaderboard (fresh, so the new score shows);
+    /// "you've done this before" opens Program.
+    private func follow(_ route: Push.Route?) {
+        guard let route else { return }
+        Push.shared.route = nil
+        if route.kind == "wod_again" {
+            tab = .program
+            return
+        }
+        tab = .leaderboards
+        guard let wodId = route.wodId else { return }
+        Task {
+            await model.reload()
+            if let wod = model.wods.first(where: { $0.id == wodId }) {
+                boardPath = [wod]
+            }
+        }
     }
 }
 
