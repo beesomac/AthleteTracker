@@ -14,6 +14,7 @@ final class Push {
     /// Where a tapped notification should take you. MainTabView follows it (and clears it) as soon
     /// as it's on screen, so it works whether the tap launched the app or brought it back.
     struct Route: Equatable {
+        let id: String?
         let kind: String?
         let wodId: String?
         let at = Date()        // two taps on the same board are still two changes
@@ -65,16 +66,18 @@ final class Push {
         }
     }
 
-    /// A notification was tapped: mark it read (same as clicking it in the web bell) and open it.
+    /// A notification was tapped. MainTabView opens it (and marks it read) once the app is signed in
+    /// and loaded, which on a cold start is a moment after this runs.
     func opened(id: String?, kind: String?, wodId: String?) {
-        route = Route(kind: kind, wodId: wodId)
-        guard let id else { return }
-        Task {
-            _ = try? await supabase.from("notifications")
-                .update(["read_at": ISO8601DateFormatter().string(from: Date())])
-                .eq("id", value: id)
-                .execute()
-        }
+        route = Route(id: id, kind: kind, wodId: wodId)
+    }
+
+    /// Same as clicking it in the web bell. Needs the signed-in session, so it runs from MainTabView.
+    func markRead(_ id: String) async {
+        _ = try? await supabase.from("notifications")
+            .update(["read_at": ISO8601DateFormatter().string(from: Date())])
+            .eq("id", value: id)
+            .execute()
     }
 }
 

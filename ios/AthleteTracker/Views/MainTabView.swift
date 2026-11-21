@@ -25,18 +25,21 @@ struct MainTabView: View {
 
     /// A tapped push: a score or board invite opens that leaderboard (fresh, so the new score shows);
     /// "you've done this before" opens Program.
+    /// Everything happens after a reload: on a cold start the tab and the session are still being
+    /// restored when the tap arrives, and switching straight away gets undone.
     private func follow(_ route: Push.Route?) {
         guard let route else { return }
         Push.shared.route = nil
-        if route.kind == "wod_again" {
-            tab = .program
-            return
-        }
-        tab = .leaderboards
-        guard let wodId = route.wodId else { return }
         Task {
             await model.reload()
-            if let wod = model.wods.first(where: { $0.id == wodId }) {
+            if let id = route.id { await Push.shared.markRead(id) }
+            if route.kind == "wod_again" {
+                tab = .program
+                return
+            }
+            tab = .leaderboards
+            if let wodId = route.wodId?.lowercased(),
+               let wod = model.wods.first(where: { $0.id.lowercased() == wodId }) {
                 boardPath = [wod]
             }
         }
