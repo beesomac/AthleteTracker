@@ -11,8 +11,14 @@ import UserNotifications
 final class Push {
     static let shared = Push()
 
-    /// Set when a notification is tapped; MainTabView switches to the matching tab.
-    var openedKind: String?
+    /// Where a tapped notification should take you. MainTabView follows it (and clears it) as soon
+    /// as it's on screen, so it works whether the tap launched the app or brought it back.
+    struct Route: Equatable {
+        let kind: String?
+        let wodId: String?
+        let at = Date()        // two taps on the same board are still two changes
+    }
+    var route: Route?
 
     private var token: String?
     private var signedIn = false
@@ -59,9 +65,9 @@ final class Push {
         }
     }
 
-    /// A notification was tapped: mark it read (same as clicking it in the web bell) and open its tab.
-    func opened(id: String?, kind: String?) {
-        openedKind = kind
+    /// A notification was tapped: mark it read (same as clicking it in the web bell) and open it.
+    func opened(id: String?, kind: String?, wodId: String?) {
+        route = Route(kind: kind, wodId: wodId)
         guard let id else { return }
         Task {
             _ = try? await supabase.from("notifications")
@@ -104,6 +110,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         let info = response.notification.request.content.userInfo
         let id = info["id"] as? String
         let kind = info["kind"] as? String
-        await MainActor.run { Push.shared.opened(id: id, kind: kind) }
+        let wodId = info["wod_id"] as? String
+        await MainActor.run { Push.shared.opened(id: id, kind: kind, wodId: wodId) }
     }
 }
