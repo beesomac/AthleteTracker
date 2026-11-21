@@ -6,6 +6,14 @@ struct SessionDetailView: View {
     let program: ProgramRow
     @State private var timer: WodTimerItem?
     @State private var timerBlock: Block?
+    @State private var scoring: ScoreItem?
+
+    struct ScoreItem: Identifiable {
+        let id = UUID()
+        let plan: WodPlan
+        let actuals: [[String]]
+        let save: ScoreSaver
+    }
 
     var body: some View {
         List {
@@ -42,6 +50,11 @@ struct SessionDetailView: View {
                         Button { startWod(block) } label: {
                             Label("Start WOD", systemImage: "stopwatch")
                         }
+                        if let save = logger(for: block) {
+                            Button { logScore(block, save: save) } label: {
+                                Label("Log score", systemImage: "square.and.pencil")
+                            }
+                        }
                     }
                     blockRows(block)
                 } header: {
@@ -66,6 +79,10 @@ struct SessionDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await model.reload() }
         .wodTimer($timer, log: logger(for: timerBlock))
+        .sheet(item: $scoring) { (item: ScoreItem) in
+            LogScoreSheet(title: item.plan.title, scoreType: item.plan.scoreType, timeCap: item.plan.cap,
+                          plan: item.plan, actuals: item.actuals, save: item.save)
+        }
     }
 
     /// A library WOD with rounds shows round by round (21.1: 1 + 10, 3 + 30, …);
@@ -74,12 +91,39 @@ struct SessionDetailView: View {
     private func blockRows(_ block: Block) -> some View {
         let lib: LibraryWod? = WodLibrary.find(block.wod)
         if let lib, let rounds = lib.roundSets, !rounds.isEmpty {
-            WodRoundsList(rounds: rounds, repeats: lib.roundRepeat)
+            WodRoundsList(program: program, exercises: block.exercises, rounds: rounds, repeats: lib.roundRepeat)
         } else {
             ForEach(block.exercises) { (ex: Exercise) in
                 ExerciseRow(program: program, exercise: ex, tick: model.tick(program, ex))
             }
         }
+    }
+
+    /// Log a score by hand: round times typed in, and the reps from any movement ticked
+    /// as not finished in the session.
+    private func logScore(_ block: Block, save: @escaping ScoreSaver) {
+        let lib: LibraryWod? = WodLibrary.find(block.wod)
+        let plan: WodPlan = WodPlan.make(library: lib, block: block, board: board(for: block))
+        scoring = ScoreItem(plan: plan, actuals: actuals(block, plan: plan), save: save)
+    }
+
+    private func actuals(_ block: Block, plan: WodPlan) -> [[String]] {
+        var out: [[String]] = []
+        for (i, round) in plan.rounds.enumerated() {
+            var line: [String] = []
+            for (j, m) in round.enumerated() {
+                let ex: Exercise? = block.exercises.count == round.count && j < block.exercises.count
+                    ? block.exercises[j]
+                    : block.exercises.first { $0.name.lowercased() == m.name.lowercased() }
+                var text = ""
+                if let ex, let reps = model.tick(program, ex)?.sets[String(i + 1)]?.reps, Int(reps) < max(1, m.reps) {
+                    text = SessionFormat.number(reps)
+                }
+                line.append(text)
+            }
+            out.append(line)
+        }
+        return out
     }
 
     private func startWod(_ block: Block) {
@@ -225,14 +269,141 @@ struct SetDots: View {
     }
 }
 
-/// A WOD's rounds, one line each: "Round 3 · 6 reps Wall Walk, 60 reps Double-under".
+/// A WOD's rounds: a tick box for every movement in every round, and a box for the reps
+/// done when a movement wasn't finished. An AMRAP (repeating round) just lists its round.
 struct WodRoundsList: View {
+    let program: ProgramRow
+    let exercises: [Exercise]
     let rounds: [[WodSet]]
     let repeats: Bool
 
+    /// The program exercise behind a movement: same position, else same name.
+    private func exercise(for set: WodSet, at j: Int, roundSize: Int) -> Exercise? {
+        if exercises.count == roundSize, j < exercises.count { return exercises[j] }
+        return exercises.first { $0.name.lowercased() == set.name.lowercased() }
+    }
+
     var body: some View {
         ForEach(rounds.indices, id: \.self) { (i: Int) in
-            WodRoundLine(label: repeats ? "Each round" : "Round \(i + 1)", sets: rounds[i])
+            if repeats {
+                WodRoundLine(label: "Each round", sets: rounds[i])
+            } else {
+                Text("Round \(i + 1)")
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                    .listRowSeparator(.hidden, edges: .bottom)
+                ForEach(rounds[i].indices, id: \.self) { (j: Int) in
+                    WodMovementRow(program: program,
+                                   exercise: exercise(for: rounds[i][j], at: j, roundSize: rounds[i].count),
+                                   round: i + 1, movement: rounds[i][j])
+                }
+            }
+        }
+    }
+}
+
+/// One movement in one round: tick it when done, or type the reps you got.
+struct WodMovementRow: View {
+    @Environment(AppModel.self) private var model
+    let program: ProgramRow
+    let exercise: Exercise?
+    let round: Int
+    let movement: WodSet
+
+    @State private var text = ""
+    @State private var error: String?
+    @FocusState private var focused: Bool
+
+    private var entry: SetEntry? {
+        guard let exercise else { return nil }
+        return model.tick(program, exercise)?.sets[String(round)]
+    }
+
+    /// Done as written: ticked with no reps, or reps at least the target.
+    private var isDone: Bool {
+        guard let entry else { return false }
+        guard let reps = entry.reps else { return true }
+        let target = movement.reps
+        return target > 0 && Int(reps) >= target
+    }
+
+    private var isPartial: Bool { entry != nil && !isDone }
+
+    private var symbol: String {
+        if isDone { return "checkmark.circle.fill" }
+        if isPartial { return "circle.lefthalf.filled" }
+        return "circle"
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button { toggle() } label: {
+                Image(systemName: symbol)
+                    .font(.title2)
+                    .foregroundStyle(entry != nil ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
+            }
+            .buttonStyle(.borderless)
+            .disabled(exercise == nil)
+            .accessibilityLabel(isDone ? "Done" : "Not done")
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(movement.target) \(movement.name)")
+                    .strikethrough(isDone)
+                    .foregroundStyle(isDone ? .secondary : .primary)
+                if let error { Text(error).font(.caption).foregroundStyle(.red) }
+            }
+            Spacer(minLength: 4)
+            TextField("reps", text: $text)
+                .keyboardType(.numberPad)
+                .multilineTextAlignment(.trailing)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 70)
+                .focused($focused)
+                .disabled(exercise == nil)
+                .accessibilityLabel("Reps done, \(movement.name), round \(round)")
+        }
+        .onAppear { syncText() }
+        .onChange(of: entry?.reps) { if !focused { syncText() } }
+        .onChange(of: focused) { if !focused { saveReps() } }
+        .toolbar {
+            if focused {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { focused = false }
+                }
+            }
+        }
+    }
+
+    private func syncText() {
+        if let reps = entry?.reps { text = SessionFormat.number(reps) } else { text = "" }
+    }
+
+    private func toggle() {
+        let next: SetEntry? = entry == nil || isPartial ? SetEntry(at: Date.now.ISO8601Format()) : nil
+        if next != nil { text = "" }
+        save(next)
+    }
+
+    private func saveReps() {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty {
+            if entry?.reps != nil { save(nil) }
+            return
+        }
+        guard let n = Double(trimmed), n >= 0 else { syncText(); return }
+        if entry?.reps == n { return }
+        save(SetEntry(at: Date.now.ISO8601Format(), reps: n))
+    }
+
+    private func save(_ next: SetEntry?) {
+        guard let exercise else { return }
+        error = nil
+        Task {
+            do {
+                try await model.setRoundTick(program, exercise, round: round, entry: next)
+            } catch {
+                self.error = "Couldn't save: \(error.localizedDescription)"
+            }
         }
     }
 }

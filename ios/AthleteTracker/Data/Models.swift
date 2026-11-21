@@ -185,6 +185,14 @@ nonisolated struct TickRow: Decodable, Sendable {
         case skipReason = "skip_reason"
     }
 
+    init(sessionId: String, exerciseId: String, sets: [String: SetEntry], skipped: Bool = false, skipReason: String? = nil) {
+        self.sessionId = sessionId
+        self.exerciseId = exerciseId
+        self.sets = sets
+        self.skipped = skipped
+        self.skipReason = skipReason
+    }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         sessionId = try c.decode(String.self, forKey: .sessionId)
