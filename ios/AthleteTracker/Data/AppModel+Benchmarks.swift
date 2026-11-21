@@ -143,7 +143,7 @@ extension AppModel {
                 } catch where Self.missingDetailColumn(error) {
                     let withRounds = Self.noteWithRounds(note, detail)
                     if withRounds != note {
-                        try? await supabase.from("wod_results").update(NotePayload(note: String(withRounds.prefix(500)))).eq("id", value: id).execute()
+                        _ = try? await supabase.from("wod_results").update(NotePayload(note: String(withRounds.prefix(500)))).eq("id", value: id).execute()
                     }
                 } catch {
                     // The score is saved; only the round detail is missing.
