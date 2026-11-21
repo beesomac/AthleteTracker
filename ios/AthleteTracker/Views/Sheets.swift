@@ -10,6 +10,8 @@ struct LogScoreSheet: View {
     var timeCap: Int? = nil
     var plan: WodPlan? = nil
     var prefill: TimerResult? = nil
+    /// Reps typed in the session for movements not finished: [round][movement], "" when done.
+    var actuals: [[String]]? = nil
     let save: ScoreSaver
 
     @State private var text = ""
@@ -123,6 +125,13 @@ struct LogScoreSheet: View {
         ready = true
         by = prefill?.by ?? plan.defaultSplitBy
         remap()
+        if let actuals {
+            for i in rounds.indices where i < actuals.count {
+                for j in rounds[i].sets.indices where j < actuals[i].count && rounds[i].sets[j].actual.isEmpty {
+                    rounds[i].sets[j].actual = actuals[i][j]
+                }
+            }
+        }
         guard let r = prefill else { return }
         let m = plan.map(splits: r.splits, by: r.by)
         switch scoreType {

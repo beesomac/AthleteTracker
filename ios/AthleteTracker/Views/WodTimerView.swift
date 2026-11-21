@@ -261,7 +261,8 @@ struct WodTimerView: View {
     private func runningLayout(x: Double, size: CGSize) -> some View {
         if size.width > size.height {
             HStack(spacing: 16) {
-                clockFace(x: x, digitHeight: size.height * 0.62)
+                clockFace(x: x, digitHeight: size.height * 0.62,
+                          width: size.width - max(200, size.width * 0.27) - 16)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 sidePanel(x: x)
                     .frame(width: max(200, size.width * 0.27))
@@ -269,7 +270,7 @@ struct WodTimerView: View {
         } else {
             VStack(spacing: 12) {
                 topBar
-                clockFace(x: x, digitHeight: size.width * 0.42)
+                clockFace(x: x, digitHeight: size.width * 0.42, width: size.width)
                     .frame(maxHeight: .infinity)
                 if x >= 0 { roundView(x) }
                 Text(lastSplitText(x)).font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
@@ -290,8 +291,27 @@ struct WodTimerView: View {
         }
     }
 
+    /// The widest the clock can read during this WOD ("88:88", or "8:88:88" past an hour).
+    /// The digits are sized once from this, so they don't jump as the time changes.
+    private var clockTemplate: String {
+        let longest = max(spec.limit ?? 0, Double(plan.cap ?? 0))
+        return longest >= 3600 ? "8:88:88" : "88:88"
+    }
+
+    private static let clockFont = "DBLCDTempBlack"
+
+    /// Font size at which the template fills `width` (never taller than `maxSize`).
+    private static func clockFontSize(template: String, width: CGFloat, maxSize: CGFloat) -> CGFloat {
+        let base: CGFloat = 100
+        let font: UIFont = UIFont(name: clockFont, size: base) ?? .monospacedDigitSystemFont(ofSize: base, weight: .bold)
+        let measured: CGFloat = (template as NSString).size(withAttributes: [.font: font]).width
+        guard measured > 0, width > 0 else { return maxSize }
+        return min(maxSize, base * width / measured * 0.94)
+    }
+
     /// Big LED-style digits, like a gym clock.
-    private func clockFace(x: Double, digitHeight: CGFloat) -> some View {
+    private func clockFace(x: Double, digitHeight: CGFloat, width: CGFloat) -> some View {
+        let fontSize: CGFloat = Self.clockFontSize(template: clockTemplate, width: width, maxSize: digitHeight)
         let texts = clockTexts(x)
         let ledColor: Color = isRest ? Color(red: 0.3, green: 0.95, blue: 0.5) : Color(red: 1.0, green: 0.23, blue: 0.16)
         return VStack(spacing: 4) {
@@ -299,12 +319,12 @@ struct WodTimerView: View {
                 .font(.headline.weight(.semibold)).tracking(3)
                 .foregroundStyle(isRest ? Color.green : Color.secondary)
             Text(texts.big)
-                .font(.custom("DBLCDTempBlack", size: digitHeight))
+                .font(.custom(Self.clockFont, size: fontSize))
                 .monospacedDigit()
                 .foregroundStyle(ledColor)
                 .shadow(color: ledColor.opacity(0.55), radius: 12)
-                .minimumScaleFactor(0.2)
                 .lineLimit(1)
+                .fixedSize()
             Text(texts.sub).font(.title3.monospacedDigit()).foregroundStyle(.secondary)
         }
     }

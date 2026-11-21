@@ -147,6 +147,29 @@ extension AppModel {
         await loadBenchmarks(for: athlete)
     }
 
+    // MARK: WOD rounds
+
+    /// Tick one movement in one round of a WOD block, or clear it (entry nil).
+    /// Round n is set n on that movement's exercise, so the website sees the same ticks.
+    /// An entry with reps means the movement wasn't finished: that many reps were done.
+    func setRoundTick(_ program: ProgramRow, _ exercise: Exercise, round: Int, entry: SetEntry?) async throws {
+        guard let athlete = athleteEmail else { return }
+        let key = program.id + "__" + exercise.id
+        let old: TickRow? = ticks[key]
+        var sets: [String: SetEntry] = old?.sets ?? [:]
+        if let entry { sets[String(round)] = entry } else { sets.removeValue(forKey: String(round)) }
+        ticks[key] = TickRow(sessionId: program.id, exerciseId: exercise.id, sets: sets)
+        do {
+            try await supabase.from("ticks").upsert(TickPayload(
+                athlete_email: athlete, session_id: program.id, exercise_id: exercise.id, sets: sets,
+                skipped: false, skip_reason: nil, updated_by_email: email, updated_at: Date.now.ISO8601Format()
+            ), onConflict: "athlete_email,session_id,exercise_id").execute()
+        } catch {
+            ticks[key] = old
+            throw error
+        }
+    }
+
     // MARK: 1RMs
 
     func saveMax(key: String, name: String, kg: Double, on day: Date) async throws {

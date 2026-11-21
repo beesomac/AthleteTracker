@@ -423,6 +423,9 @@
       const roundsN = Math.max(0, ...active.map((ex) => ex.sets || 1));
       const lifts = liftHistory();
       html += `<section class="block"><div class="block-head"><span class="letter">${esc(b.key)}</span><h3>${esc(b.name)}</h3>${roundsN ? `<span class="rounds">${roundsN} ${circuit ? "round" : "set"}${roundsN > 1 ? "s" : ""}</span>` : ""}</div>${b.note ? `<div class="block-note">${esc(b.note)}</div>` : ""}${wodPanelHTML(b)}`;
+      // A library WOD with rounds (21.1) is ticked round by round in its panel above.
+      const libWod = WT && b.wod ? WT.find(b.wod) : null;
+      if (info.v2 && libWod && libWod.round_sets && libWod.round_sets.length && !libWod.round_repeat) { html += `</section>`; continue; }
       let setsHtml = "";
       if (active.length && active.every(tickOnly)) {
         setsHtml += `<div class="how">Tap the circle when it's done.</div><div class="round-grid">`;
@@ -614,11 +617,33 @@
     } else hist = `<b>First time${isTrainer() ? " for " + esc(athleteName()) : ""}.</b> Your score today sets the benchmark.`;
     const mine = !isTrainer() || info.athlete === String(state.me || "").toLowerCase();
     const canLog = board && board.status === "open" && mine;
-    const sid = (currentView() || {}).id || "";
     const startBtn = window.WodTimer ? `<button class="btn primary" data-act="start-wod" data-sid="${esc(sid)}" data-bkey="${esc(b.key)}" data-wod="${esc(canLog ? board.id : "")}">Start WOD</button>` : "";
     const lib = WT && b.wod ? WT.find(b.wod) : null;
-    const roundsTable = lib && lib.round_sets && lib.round_sets.length ? `<ol class="wod-plan">${lib.round_sets.map((r, i) => `<li><span>${lib.round_repeat ? "Each round" : "Round " + (i + 1)}</span><span>${r.map((x) => `<b>${esc(x.target)}</b> ${esc(x.name)}`).join("<br>")}</span></li>`).join("")}</ol>` : "";
+    const sid = (currentView() || {}).id || "";
+    const roundsTable = lib && lib.round_sets && lib.round_sets.length ? wodRoundsHTML(b, lib, sid) : "";
     return `<div class="wod-panel">${roundsTable}<div class="wod-hist">${hist}</div>${board ? `<div class="wod-board-row"><span class="extra">Leaderboard: ${esc(board.name)}${board.status === "closed" ? " (closed)" : ""}</span><span class="row">${startBtn}${canLog ? `<button class="btn" data-act="score-from-session" data-wod="${esc(board.id)}" data-sid="${esc(sid)}" data-bkey="${esc(b.key)}">Log score</button>` : `<a class="btn" href="#boards">See board</a>`}</span></div>` : startBtn ? `<div class="wod-board-row"><span class="extra">Timer only: there's no leaderboard for this WOD.</span>${startBtn}</div>` : ""}</div>`;
+  }
+
+  // A WOD's rounds in the session: tick every movement in every round, or type the reps done
+  // when it wasn't finished. Round n is set n on that movement's exercise (same ticks as iOS).
+  function wodRoundExercise(b, round, j, m) {
+    const ex = b.exercises || [];
+    if (ex.length === round.length && ex[j]) return ex[j];
+    return ex.find((e) => String(e.name).toLowerCase() === String(m.name).toLowerCase()) || null;
+  }
+  function wodRoundsHTML(b, lib, sid) {
+    const R = lib.round_sets;
+    if (lib.round_repeat) return `<ol class="wod-plan">${R.map((r) => `<li><span>Each round</span><span>${r.map((x) => `<b>${esc(x.target)}</b> ${esc(x.name)}`).join("<br>")}</span></li>`).join("")}</ol>`;
+    return `<ol class="wod-plan">${R.map((r, i) => `<li><span>Round ${i + 1}</span><span class="wod-moves">${r.map((m, j) => {
+      const ex = wodRoundExercise(b, r, j, m);
+      if (!ex || !sid) return `<span class="wod-move"><span><b>${esc(m.target)}</b> ${esc(m.name)}</span></span>`;
+      const t = state.ticks[tickId(sid, ex.id)] || {};
+      const v = setInfo((t.sets || {})[i + 1]);
+      const target = WT.repsOf(m.target);
+      const done = v && (v.reps == null || (target && +v.reps >= target));
+      const part = v && !done;
+      return `<span class="wod-move${done ? " done" : ""}"><button type="button" class="wod-check${done ? " on" : part ? " part" : ""}" data-act="wod-tick" data-sid="${esc(sid)}" data-eid="${esc(ex.id)}" data-round="${i + 1}" aria-pressed="${!!done}" aria-label="${esc(m.name)}, round ${i + 1}: ${done ? "done" : "not done"}"></button><span><b>${esc(m.target)}</b> ${esc(m.name)}</span><input class="wod-reps" type="text" inputmode="numeric" placeholder="reps" value="${part && v.reps != null ? esc(v.reps) : ""}" data-sid="${esc(sid)}" data-eid="${esc(ex.id)}" data-round="${i + 1}" aria-label="Reps done, ${esc(m.name)}, round ${i + 1}"></span>`;
+    }).join("")}</span></li>`).join("")}</ol>`;
   }
 
   // ─── Rounds on a score, and the WOD timer (wodtimer.js, 011) ───────────────────────────
@@ -851,6 +876,18 @@
       const r = d.rounds[+el.dataset.r]; if (!r) return;
       if (el.dataset.k === "time") r.time = el.value; else if (r.sets[+el.dataset.s]) r.sets[+el.dataset.s].actual = el.value;
     }
+  });
+  app.addEventListener("change", async (ev) => {
+    const el = ev.target;
+    if (!el.classList || !el.classList.contains("wod-reps")) return;
+    const { sid, eid } = el.dataset, n = el.dataset.round;
+    const t = state.ticks[tickId(sid, eid)] || {};
+    const sets = Object.assign({}, t.sets || {});
+    const reps = parseInt(el.value, 10);
+    if (el.value.trim() === "") { if (setInfo(sets[n]) && setInfo(sets[n]).reps != null) delete sets[n]; else return; }
+    else if (!(reps >= 0)) return;
+    else sets[n] = { at: new Date().toISOString(), reps };
+    await persistTick(sid, eid, { sets });
   });
   app.addEventListener("change", (ev) => { if (ev.target.id === "score-rx" && state.scoreDraft) state.scoreDraft.rx = ev.target.checked; });
 
@@ -1104,6 +1141,14 @@
       try { await store.deleteNote(id); } catch (e) { state.notes = keep; scheduleRender(); writeFailed(e); }
     } else if (act === "filter") {
       state.reviewFilter = btn.dataset.f; render();
+    } else if (act === "wod-tick") {
+      const { sid, eid } = btn.dataset, n = btn.dataset.round;
+      const t = state.ticks[tickId(sid, eid)] || {};
+      const sets = Object.assign({}, t.sets || {});
+      const v = setInfo(sets[n]);
+      const partial = v && v.reps != null && !btn.classList.contains("on");
+      if (v && !partial) delete sets[n]; else sets[n] = { at: new Date().toISOString() };
+      await persistTick(sid, eid, { sets });
     } else if (act === "start-wod") {
       startWod(btn.dataset.wod || null, btn.dataset.sid, btn.dataset.bkey);
     } else if (act === "sd-by") {
