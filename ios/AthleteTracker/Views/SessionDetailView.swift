@@ -50,7 +50,7 @@ struct SessionDetailView: View {
                         Button { startWod(block) } label: {
                             Label("Start WOD", systemImage: "stopwatch")
                         }
-                        if let save = logger(for: block) {
+                        if block.scoredRounds == nil, let save = logger(for: block) {
                             Button { logScore(block, save: save) } label: {
                                 Label("Log score", systemImage: "square.and.pencil")
                             }
@@ -91,7 +91,7 @@ struct SessionDetailView: View {
     private func blockRows(_ block: Block) -> some View {
         let lib: LibraryWod? = WodLibrary.find(block.wod)
         if let lib, let rounds = lib.roundSets, !rounds.isEmpty {
-            WodRoundsList(program: program, exercises: block.exercises, rounds: rounds, repeats: lib.roundRepeat)
+            WodRoundsList(program: program, block: block, rounds: rounds, repeats: lib.roundRepeat)
         } else {
             ForEach(block.exercises) { (ex: Exercise) in
                 ExerciseRow(program: program, exercise: ex, tick: model.tick(program, ex))
@@ -133,12 +133,7 @@ struct SessionDetailView: View {
         timer = WodTimerItem(plan: plan)
     }
 
-    /// The leaderboard for a WOD block: the one the trainer picked, else an open one for the same library WOD.
-    private func board(for block: Block) -> WodRow? {
-        if let id = block.board, let b = model.wods.first(where: { $0.id == id }) { return b }
-        if let lib = block.wod { return model.wods.first { $0.libraryId == lib && $0.isOpen } }
-        return nil
-    }
+    private func board(for block: Block) -> WodRow? { model.board(for: block) }
 
     /// Where a score from the timer goes: the block's open board, or the benchmark (which opens a
     /// board). nil when there's nowhere to log it (the timer then just shows the splits).
@@ -269,19 +264,14 @@ struct SetDots: View {
     }
 }
 
-/// A WOD's rounds: a tick box for every movement in every round, and a box for the reps
-/// done when a movement wasn't finished. An AMRAP (repeating round) just lists its round.
+/// A WOD's rounds: a tick box for every movement in every round, a box for the reps done when
+/// a movement wasn't finished, and a time box under each round. The score works itself out from
+/// those and is saved as you go. An AMRAP (repeating round) just lists its round.
 struct WodRoundsList: View {
     let program: ProgramRow
-    let exercises: [Exercise]
+    let block: Block
     let rounds: [[WodSet]]
     let repeats: Bool
-
-    /// The program exercise behind a movement: same position, else same name.
-    private func exercise(for set: WodSet, at j: Int, roundSize: Int) -> Exercise? {
-        if exercises.count == roundSize, j < exercises.count { return exercises[j] }
-        return exercises.first { $0.name.lowercased() == set.name.lowercased() }
-    }
 
     var body: some View {
         ForEach(rounds.indices, id: \.self) { (i: Int) in
@@ -292,11 +282,127 @@ struct WodRoundsList: View {
                     .font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
                     .listRowSeparator(.hidden, edges: .bottom)
                 ForEach(rounds[i].indices, id: \.self) { (j: Int) in
-                    WodMovementRow(program: program,
-                                   exercise: exercise(for: rounds[i][j], at: j, roundSize: rounds[i].count),
+                    WodMovementRow(program: program, block: block,
+                                   exercise: block.exercise(for: rounds[i][j], at: j, roundSize: rounds[i].count),
                                    round: i + 1, movement: rounds[i][j])
                 }
+                WodRoundTimeRow(program: program, block: block, round: i + 1)
             }
+        }
+        if !repeats {
+            WodScoreLine(program: program, block: block)
+        }
+    }
+}
+
+/// The time a round took, typed under the round (m:ss).
+struct WodRoundTimeRow: View {
+    @Environment(AppModel.self) private var model
+    let program: ProgramRow
+    let block: Block
+    let round: Int
+
+    @State private var text = ""
+    @State private var error: String?
+    @FocusState private var focused: Bool
+
+    private var saved: Double? { model.roundTimes(program, block)[round] }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "stopwatch").foregroundStyle(.secondary).frame(width: 28)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Round \(round) time").foregroundStyle(.secondary)
+                if let error { Text(error).font(.caption).foregroundStyle(.red) }
+            }
+            Spacer(minLength: 4)
+            TextField("m:ss", text: $text)
+                .keyboardType(.numbersAndPunctuation)
+                .multilineTextAlignment(.trailing)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 80)
+                .focused($focused)
+                .submitLabel(.done)
+                .onSubmit { focused = false }
+                .accessibilityLabel("Round \(round) time")
+        }
+        .onAppear { syncText() }
+        .onChange(of: saved) { if !focused { syncText() } }
+        .onChange(of: focused) { if !focused { save() } }
+    }
+
+    private func syncText() {
+        text = saved.map { WodClock.text($0, tenths: true) } ?? ""
+    }
+
+    private func save() {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        let secs: Double?
+        if trimmed.isEmpty {
+            guard saved != nil else { return }
+            secs = nil
+        } else {
+            guard let t = WodScore.parse("time", trimmed), t > 0 else { syncText(); return }
+            if t == saved { syncText(); return }
+            secs = t
+        }
+        error = nil
+        Task {
+            do {
+                try await model.setRoundTime(program, block, round: round, secs: secs)
+                syncText()
+                model.syncSessionScore(program, block)
+            } catch {
+                self.error = "Couldn't save: \(error.localizedDescription)"
+            }
+        }
+    }
+}
+
+/// The score the ticks add up to, and whether it's on the leaderboard.
+struct WodScoreLine: View {
+    @Environment(AppModel.self) private var model
+    let program: ProgramRow
+    let block: Block
+
+    private var type: String { model.board(for: block)?.scoreType ?? WodLibrary.find(block.wod)?.score ?? "time" }
+
+    var body: some View {
+        if let s = model.sessionScore(program, block) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Score").font(.headline)
+                    Spacer()
+                    Text(scoreText(s)).font(.headline.monospacedDigit())
+                        .foregroundStyle(s.score == nil ? Color.secondary : Color.primary)
+                }
+                Text(status(s)).font(.caption).foregroundStyle(statusIsError ? Color.red : Color.secondary)
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private func scoreText(_ s: SessionScore) -> String {
+        if let score = s.score { return WodScore.format(type, score) }
+        return "–"
+    }
+
+    private var statusIsError: Bool { model.scoreError(program, block) != nil }
+
+    private func status(_ s: SessionScore) -> String {
+        if let error = model.scoreError(program, block) { return "Couldn't save the score: \(error)" }
+        switch s.state {
+        case .score:
+            if let saved = model.sessionResult(program, block), saved.score == s.score {
+                return "Logged on the leaderboard."
+            }
+            return "Saving…"
+        case .needsTimes(let missing):
+            return "All done. Add \(missing == 1 ? "the last round time" : "\(missing) round times") for your time."
+        case .inProgress:
+            return type == "time"
+                ? "Tick each movement as you finish it. If time runs out, type the reps you got on that movement and that's your score (CAP + reps)."
+                : "Tick each movement as you finish it."
         }
     }
 }
@@ -305,6 +411,7 @@ struct WodRoundsList: View {
 struct WodMovementRow: View {
     @Environment(AppModel.self) private var model
     let program: ProgramRow
+    let block: Block
     let exercise: Exercise?
     let round: Int
     let movement: WodSet
@@ -401,6 +508,7 @@ struct WodMovementRow: View {
         Task {
             do {
                 try await model.setRoundTick(program, exercise, round: round, entry: next)
+                model.syncSessionScore(program, block)
             } catch {
                 self.error = "Couldn't save: \(error.localizedDescription)"
             }
