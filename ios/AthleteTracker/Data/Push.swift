@@ -21,6 +21,9 @@ final class Push {
     }
     var route: Route?
 
+    /// Posted when a notification is tapped, so MainTabView can follow `route` straight away.
+    static let tapped = Notification.Name("PushTapped")
+
     private var token: String?
     private var signedIn = false
 
@@ -70,6 +73,7 @@ final class Push {
     /// and loaded, which on a cold start is a moment after this runs.
     func opened(id: String?, kind: String?, wodId: String?) {
         route = Route(id: id, kind: kind, wodId: wodId)
+        NotificationCenter.default.post(name: Self.tapped, object: nil)
     }
 
     /// Same as clicking it in the web bell. Needs the signed-in session, so it runs from MainTabView.

@@ -6,6 +6,7 @@ struct MainTabView: View {
     @SceneStorage("tab") private var tab: TabID = .program
     @Environment(AppModel.self) private var model
     @State private var boardPath: [WodRow] = []
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         TabView(selection: $tab) {
@@ -19,8 +20,11 @@ struct MainTabView: View {
                 BenchmarksView()
             }
         }
+        // Three ways in, so a tap is never missed: the view appearing (cold start), the tap itself
+        // (app already running), and the app coming back to the front (resumed from the background).
         .onAppear { follow(Push.shared.route) }
-        .onChange(of: Push.shared.route) { _, route in follow(route) }
+        .onReceive(NotificationCenter.default.publisher(for: Push.tapped)) { _ in follow(Push.shared.route) }
+        .onChange(of: scenePhase) { _, phase in if phase == .active { follow(Push.shared.route) } }
     }
 
     /// A tapped push: a score or board invite opens that leaderboard (fresh, so the new score shows);
@@ -30,6 +34,9 @@ struct MainTabView: View {
     private func follow(_ route: Push.Route?) {
         guard let route else { return }
         Push.shared.route = nil
+        // Switch now (enough when the app was already running), and again after the reload below
+        // in case a cold start restores the old tab in between.
+        tab = route.kind == "wod_again" ? .program : .leaderboards
         Task {
             await model.reload()
             if let id = route.id { await Push.shared.markRead(id) }
