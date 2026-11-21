@@ -110,19 +110,30 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         print("Push: registration failed:", error.localizedDescription)
     }
 
+    // These use the completion-handler forms on purpose. With the `async` forms, iOS finishes the
+    // call off the main thread and SwiftUI crashes ("Call must be made on main thread") right after
+    // a tap, which reopened the app on Program instead of the leaderboard.
+
     /// Show the banner even when the app is open.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                            willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        [.banner, .list, .sound]
+                                            willPresent notification: UNNotification,
+                                            withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .list, .sound])
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                            didReceive response: UNNotificationResponse) async {
+                                            didReceive response: UNNotificationResponse,
+                                            withCompletionHandler completionHandler: @escaping () -> Void) {
         let info = response.notification.request.content.userInfo
-        print("Push: didReceive \(info.keys.map { "\($0)" }.sorted())")
         let id = info["id"] as? String
         let kind = info["kind"] as? String
         let wodId = info["wod_id"] as? String
-        await MainActor.run { Push.shared.opened(id: id, kind: kind, wodId: wodId) }
+        nonisolated(unsafe) let done = completionHandler
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                Push.shared.opened(id: id, kind: kind, wodId: wodId)
+            }
+            done()
+        }
     }
 }
