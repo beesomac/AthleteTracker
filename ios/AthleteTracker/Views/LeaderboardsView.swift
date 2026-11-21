@@ -50,19 +50,23 @@ struct LeaderboardsView: View {
     }
 }
 
+/// One leaderboard: the workout, everyone's best scores, and your own scores (swipe to delete one
+/// entered by mistake).
 struct LeaderboardDetailView: View {
     @Environment(AppModel.self) private var model
     let wod: WodRow
     @State private var logging = false
-    @State private var timer: WodTimerItem?
+    @State private var deleting: ResultRow?
+    @State private var deleteError: String?
 
     private var plan: WodPlan { WodPlan.make(library: WodLibrary.find(wod.libraryId), board: wod) }
+    private var canDelete: Bool { wod.isOpen || model.isTrainer }
 
     var body: some View {
         List {
-            infoSection
-            lastRoundsSection
+            workoutSection
             boardSection
+            historySection
         }
         .navigationTitle(wod.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -77,7 +81,25 @@ struct LeaderboardDetailView: View {
         .sheet(isPresented: $logging) {
             LogScoreSheet(title: wod.name, scoreType: wod.scoreType, timeCap: wod.timeCapSeconds, plan: plan, save: saver)
         }
-        .wodTimer($timer, log: openSaver)
+        .confirmationDialog("Delete this score?", isPresented: deletingShown, titleVisibility: .visible,
+                            presenting: deleting) { (r: ResultRow) in
+            Button("Delete \(WodScore.format(wod.scoreType, r.score))", role: .destructive) { delete(r) }
+        } message: { (r: ResultRow) in
+            Text(r.performedOn.map { SessionDate.label($0) } ?? "")
+        }
+        .alert("Couldn't delete", isPresented: errorShown) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(deleteError ?? "")
+        }
+    }
+
+    private var deletingShown: Binding<Bool> {
+        Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })
+    }
+
+    private var errorShown: Binding<Bool> {
+        Binding(get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })
     }
 
     /// Saves a score on this board.
@@ -90,53 +112,73 @@ struct LeaderboardDetailView: View {
         return save
     }
 
-    /// The saver, only while the board is open.
-    private var openSaver: ScoreSaver? {
-        if wod.isOpen { return saver }
-        return nil
+    private func delete(_ r: ResultRow) {
+        deleting = nil
+        Task {
+            do { try await model.deleteResult(r) } catch { deleteError = error.localizedDescription }
+        }
     }
 
-    @ViewBuilder private var infoSection: some View {
-        Section {
+    @ViewBuilder private var workoutSection: some View {
+        Section("Workout") {
             if let d = wod.description, !d.isEmpty { Text(d) }
-            LabeledContent("Score", value: WodScore.label(wod.scoreType))
             if let cap = wod.timeCapSeconds, cap > 0 {
                 LabeledContent("Time cap", value: WodScore.format("time", Double(cap)))
             }
-            if let lib = WodLibrary.find(wod.libraryId) {
-                NavigationLink("Benchmark history") { BenchmarkDetailView(wod: lib) }
-            }
-            Button {
-                timer = WodTimerItem(plan: plan)
-            } label: {
-                Label("Start WOD", systemImage: "stopwatch")
-            }
-        }
-    }
-
-    /// The athlete's latest score here that has round times.
-    private var lastDetail: WodDetail? {
-        let rows: [ResultRow] = model.history(for: wod)
-        for r in rows {
-            if let d = r.detail, !d.roundTimes.isEmpty { return d }
-        }
-        return nil
-    }
-
-    @ViewBuilder private var lastRoundsSection: some View {
-        if let d = lastDetail {
-            Section("Your last rounds") { RoundTimesView(detail: d) }
         }
     }
 
     @ViewBuilder private var boardSection: some View {
         let rows: [RankedRow] = model.boardRows(wod)
-        Section("Leaderboard") {
+        Section("Scores") {
             if rows.isEmpty {
-                Text("No scores yet. Be the first.").foregroundStyle(.secondary)
+                Text("No scores yet.").foregroundStyle(.secondary)
             }
             ForEach(rows) { (item: RankedRow) in
                 BoardLine(rank: item.rank, row: item.row, scoreType: wod.scoreType)
+            }
+        }
+    }
+
+    @ViewBuilder private var historySection: some View {
+        let mine: [ResultRow] = model.history(for: wod)
+        if !mine.isEmpty {
+            Section {
+                ForEach(mine) { (r: ResultRow) in
+                    HistoryLine(result: r, scoreType: wod.scoreType)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            if canDelete {
+                                Button("Delete", role: .destructive) { deleting = r }
+                            }
+                        }
+                }
+            } header: {
+                Text("My history")
+            } footer: {
+                if canDelete { Text("Entered one wrong? Swipe left on it to delete it.") }
+            }
+        }
+    }
+}
+
+/// One of your own scores: date, score, Rx, note and round times.
+struct HistoryLine: View {
+    let result: ResultRow
+    let scoreType: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text(result.performedOn.map { SessionDate.label($0) } ?? "").foregroundStyle(.secondary)
+                Spacer()
+                Text(WodScore.format(scoreType, result.score)).font(.body.monospacedDigit().weight(.semibold))
+                Text(result.rx ? "Rx" : "Scaled").font(.caption2).foregroundStyle(.secondary)
+            }
+            if let note = result.note, !note.isEmpty {
+                Text(note).font(.caption).foregroundStyle(.secondary)
+            }
+            if let summary = result.detail?.summary {
+                Text(summary).font(.caption).foregroundStyle(.secondary)
             }
         }
     }
