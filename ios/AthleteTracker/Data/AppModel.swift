@@ -38,6 +38,10 @@ final class AppModel {
     var maxes: [String: LiftMax] = [:]          // lift key → 1RM
     var isLoading = false
     var loadError: String?
+    /// Why a WOD block's score couldn't be saved, by "sessionId__blockKey".
+    var scoreErrors: [String: String] = [:]
+    /// One score save at a time per WOD block, so quick edits don't add two scores.
+    @ObservationIgnored var scoreTasks: [String: Task<Void, Never>] = [:]
 
     private static let athleteKey = "athlete-email"
     private var authTask: Task<Void, Never>?

@@ -193,14 +193,20 @@ nonisolated struct WodDetail: Codable, Sendable, Hashable {
     var splits: [Double]?
     var splitBy: String?
     var timer: String?
+    /// Set on a score worked out from a session's ticks: which session and WOD block it came
+    /// from, so later edits in the session change that score instead of adding another.
+    var session: String?
+    var block: String?
 
     enum CodingKeys: String, CodingKey {
-        case rounds, splits, timer
+        case rounds, splits, timer, session, block
         case splitBy = "split_by"
     }
 
-    init(rounds: [Round], splits: [Double]? = nil, splitBy: String? = nil, timer: String? = nil) {
+    init(rounds: [Round], splits: [Double]? = nil, splitBy: String? = nil, timer: String? = nil,
+         session: String? = nil, block: String? = nil) {
         self.rounds = rounds; self.splits = splits; self.splitBy = splitBy; self.timer = timer
+        self.session = session; self.block = block
     }
 
     init(from decoder: Decoder) throws {
@@ -209,6 +215,8 @@ nonisolated struct WodDetail: Codable, Sendable, Hashable {
         splits = try? c.decode([Double].self, forKey: .splits)
         splitBy = try? c.decode(String.self, forKey: .splitBy)
         timer = try? c.decode(String.self, forKey: .timer)
+        session = try? c.decode(String.self, forKey: .session)
+        block = try? c.decode(String.self, forKey: .block)
     }
 
     var roundTimes: [Double] { rounds.compactMap(\.time) }
