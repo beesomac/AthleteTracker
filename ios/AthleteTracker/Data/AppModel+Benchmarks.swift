@@ -101,6 +101,17 @@ extension AppModel {
         await loadBenchmarks(for: athlete)
     }
 
+    /// Take back a score entered by mistake. Athletes can delete their own while the board is
+    /// open; trainers any time (database rules).
+    func deleteResult(_ result: ResultRow) async throws {
+        guard let athlete = athleteEmail else { return }
+        let gone: [IdOnly] = try await supabase.from("wod_results").delete()
+            .eq("id", value: result.id).select("id").execute().value
+        if gone.isEmpty { throw DeleteResultError.notAllowed }
+        results.removeAll { $0.id == result.id }
+        await loadBenchmarks(for: athlete)
+    }
+
     nonisolated static func missingDetailColumn(_ error: Error) -> Bool {
         let text = "\(error)"
         return text.contains("detail") && (text.contains("PGRST204") || text.contains("column"))
@@ -224,7 +235,16 @@ enum BenchmarkError: LocalizedError {
     }
 }
 
+enum DeleteResultError: LocalizedError {
+    case notAllowed
+    var errorDescription: String? { "That score can't be deleted. The leaderboard may be closed; ask your trainer." }
+}
+
 // MARK: - Payloads (snake_case to match the columns)
+
+private nonisolated struct IdOnly: Decodable, Sendable {
+    let id: String
+}
 
 private nonisolated struct NewResult: Encodable, Sendable {
     let wod_id: String

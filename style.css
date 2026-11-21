@@ -272,6 +272,11 @@ li.step-row.tick-only .step-main{cursor:default}
 .wod-hist ul{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:3px}
 .wod-hist li{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
 .wod-hist li>span:first-child{color:var(--muted);min-width:92px;font-size:13px}
+.my-scores{margin:8px 0}
+.my-scores ul{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:4px}
+.my-scores li{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.my-scores li>span:first-child{color:var(--muted);min-width:92px;font-size:13px}
+.btn.small{padding:2px 8px;font-size:12px;min-height:0}
 .wod-board-row{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
 
 /* "A new version is ready" bar (store.js watchForUpdates). */

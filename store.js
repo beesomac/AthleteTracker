@@ -234,6 +234,13 @@
         // The board is ranked in the database, so fetch it again rather than waiting for the live update.
         if (listener) listener(await loadAll());
       },
+      // Take back a score entered by mistake (athletes: their own, while the board is open).
+      async deleteResult(id) {
+        const { data, error } = await sb.from("wod_results").delete().eq("id", id).select("id");
+        if (error) throw error;
+        if (!data || !data.length) throw new Error("That score can't be deleted (the leaderboard may be closed).");
+        if (listener) listener(await loadAll());
+      },
     };
   }
 
@@ -254,6 +261,7 @@
       info: { v2: false, role: null, athletes: [], names: {} },
       async setAthlete() {},
       async addResult() {},
+      async deleteResult() {},
       async currentUser() { return me; },
       onAuthChange() {},
       async signIn() {},

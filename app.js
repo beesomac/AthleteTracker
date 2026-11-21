@@ -757,6 +757,16 @@
     setTimeout(renderWho, 1500);
   }
 
+  // Your own scores on a board, newest first, each with a delete (tap twice) for a wrong entry.
+  function myScoresHTML(w) {
+    const mine = state.myResults.filter((r) => r.wod_id === w.id)
+      .sort((a, c) => String(c.performed_on).localeCompare(String(a.performed_on)));
+    if (!mine.length) return "";
+    const canDel = w.status === "open" || isTrainer();
+    const who = isTrainer() ? esc(athleteName()) + "'s" : "Your";
+    return `<div class="my-scores"><div class="eyebrow">${who} scores</div><ul>${mine.map((r) => `<li><span>${esc(fmtDate(r.performed_on))}</span><b>${esc(W.format(w.score_type, r.score))}${r.rx ? " Rx" : " scaled"}</b>${r.note ? ` <span class="extra">${esc(r.note)}</span>` : ""}${canDel ? ` <button class="btn small" data-act="del" data-score="1" data-id="${esc(r.id)}">${state.confirmDelete === r.id ? "Tap again to delete" : "Delete"}</button>` : ""}${roundTimesHTML(r.detail)}</li>`).join("")}</ul></div>`;
+  }
+
   // Leaderboards: every open or closed WOD, best score per athlete, and a form to log your own.
   function renderBoards() {
     const wods = state.wods.filter((w) => w.status !== "draft");
@@ -773,6 +783,7 @@
           <div class="extra">${esc(t.label)}${w.time_cap_seconds ? ` · cap ${esc(W.format("time", w.time_cap_seconds))}` : ""}${w.wod_date ? ` · ${esc(fmtDate(w.wod_date))}` : ""}${w.status === "closed" ? " · closed" : ""}</div></div>
           ${canLog ? `<span class="row">${WT ? `<button class="btn primary" data-act="start-wod" data-wod="${esc(w.id)}">Start WOD</button>` : ""}<button class="btn" data-act="open-score" data-wod="${esc(w.id)}">Log score</button></span>` : ""}</div>
         ${w.description ? `<div class="cue wod-desc">${esc(w.description)}</div>` : ""}
+        ${myScoresHTML(w)}
         ${rows.length ? `<ol class="ranks">${rows.map((r) => `<li class="${r.is_me ? "me" : ""}"><span class="rank">${r.rank}</span><span class="who">${esc(r.athlete_name)}${r.is_me ? " (you)" : ""}${r.rx ? "" : ` <span class="chip swap">Scaled</span>`}</span><span class="score">${esc(W.format(w.score_type, r.score))}</span></li>`).join("")}</ol>` : `<div class="extra">No scores yet.</div>`}
         ${state.openScore === w.id ? (() => { const d = state.scoreDraft && state.scoreDraft.wod === w.id ? state.scoreDraft : null; const cap = !!(d && d.capped); return `<form class="score-form" data-wod="${esc(w.id)}" data-type="${esc(w.score_type)}">
           ${w.score_type === "time" ? `<label class="check"><input id="score-capped" type="checkbox"${cap ? " checked" : ""}> Didn't finish in the time cap${w.time_cap_seconds ? ` (${esc(W.format("time", w.time_cap_seconds))})` : ""}</label>` : ""}
@@ -1137,6 +1148,11 @@
       const id = btn.dataset.id;
       if (state.confirmDelete !== id) { state.confirmDelete = id; render(); return; }
       state.confirmDelete = null;
+      if (btn.dataset.score) {
+        const keep = state.myResults; state.myResults = keep.filter((x) => x.id !== id); scheduleRender();
+        try { await store.deleteResult(id); } catch (e) { state.myResults = keep; scheduleRender(); writeFailed(e); }
+        return;
+      }
       const keep = state.notes; state.notes = state.notes.filter((x) => x.id !== id); scheduleRender();
       try { await store.deleteNote(id); } catch (e) { state.notes = keep; scheduleRender(); writeFailed(e); }
     } else if (act === "filter") {
