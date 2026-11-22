@@ -13,11 +13,12 @@
     login: {}, athleteFilter: "", notesFilter: "open", confirm: null,
     editingMember: null, edit: null, reply: null, editingWod: false, fileIds: null,
     fileSessions: [], librarySeed: null, wodSeed: null, wodDraft: null, pendingWod: null,
-    boardMembers: null, boardAsk: null, reorder: null,   // reorder: { athlete, ids } while reordering programs   // boardMembers null = 007_wod_boards.sql not run yet
+    boardMembers: null, boardAsk: null, reorder: null, copyWeek: null,   // reorder: { athlete, ids } while reordering programs   // boardMembers null = 007_wod_boards.sql not run yet
     builder: { query: "", cat: "", target: null, open: new Set(), confirm: null, libTab: "ex", wodGroup: "open", wodInfo: null },
     libPage: { query: "", cat: "", wodGroup: "open", open: null },
   };
   const PB = window.ProgramBuilder;
+  const PS = window.ProgramScale;
 
   // ─── helpers ──────────────────────────────────────────────────────────────────────────
   function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
@@ -188,7 +189,9 @@
     let html = `<section class="hero"><div class="eyebrow">Session plans</div><h2>Programs</h2>
       <div class="toolbar"><select class="filter-athlete" aria-label="Athlete">${athleteOptions(f, { all: true })}</select>
         ${f && ownPrograms(f).length > 1 && !state.reorder ? `<button class="btn" data-act="reorder-start">Reorder sessions</button>` : ""}
+        ${!state.copyWeek && athletes().some((a) => ownPrograms(a.email).length) ? `<button class="btn" data-act="copyweek-start">Copy a week</button>` : ""}
         <a class="btn primary" href="#program-new">New program</a></div></section>`;
+    if (state.copyWeek) return html + copyWeekHTML();
     if (state.reorder && state.reorder.athlete === f) return html + reorderHTML();
     state.reorder = null;
     if (missingFiles.length && activeAthletes().length) {
@@ -281,6 +284,99 @@
       if (to > from) to--; reorderMove(from, to);
     });
     app.addEventListener("dragend", () => { dragI = null; app.querySelectorAll("#reorder-list .dragging,#reorder-list .drop-before").forEach((x) => x.classList.remove("dragging", "drop-before")); });
+  }
+
+  // ─── copy a week to another athlete, scaled ────────────────────────────────────────────
+  // Every program the source athlete has in one Monday–Sunday week is copied as a NEW program
+  // for the other athlete (nothing is overwritten, so both histories stay), on the same weekdays
+  // of the chosen week. Reps, bar weights and dumbbells are scaled by scale.js; dumbbells and
+  // kettlebells come out as a choice of real sizes, which the trainer confirms here.
+  const SIZES_KEY = "console.weightSizes";
+  function loadSizes() {
+    let saved = {}; try { saved = JSON.parse(localStorage.getItem(SIZES_KEY) || "{}") || {}; } catch (e) { saved = {}; }
+    return { db: PS.parseSizes(saved.db, PS.DUMBBELLS), kb: PS.parseSizes(saved.kb, PS.KETTLEBELLS) };
+  }
+  function saveSizes(sz) { try { localStorage.setItem(SIZES_KEY, JSON.stringify({ db: sz.db.join(", "), kb: sz.kb.join(", ") })); } catch (e) { /* private window */ } }
+  function addDays(iso, n) { const d = new Date(String(iso).slice(0, 10) + "T12:00:00"); d.setDate(d.getDate() + n); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+  function mondayOf(iso) { const d = new Date(String(iso).slice(0, 10) + "T12:00:00"); return addDays(iso, -((d.getDay() + 6) % 7)); }
+  const daysBetween = (a, b) => Math.round((new Date(b + "T12:00:00") - new Date(a + "T12:00:00")) / 864e5);
+  function weeksOf(email) {
+    const m = new Map();
+    for (const p of ownPrograms(email)) { const w = mondayOf(p.date); if (!m.has(w)) m.set(w, []); m.get(w).push(p); }
+    return [...m.entries()].map(([week, progs]) => ({ week, progs }));
+  }
+  const weekLabel = (w) => `${fmtDate(w)} – ${fmtDate(addDays(w, 6))}`;
+  function startCopyWeek() {
+    const withProgs = athletes().filter((a) => ownPrograms(a.email).length);
+    const from = (withProgs.find((a) => a.email === state.athleteFilter) || withProgs[0]).email;
+    const weeks = weeksOf(from), thisWeek = mondayOf(today());
+    const w = (weeks.find((x) => x.week === thisWeek) || weeks.find((x) => x.week > thisWeek) || weeks[weeks.length - 1]).week;
+    const to = (athletes().find((a) => a.email !== from && a.active) || { email: from }).email;
+    state.copyWeek = { from, week: w, to, toWeek: w, pct: 80, publish: false, picks: {}, sizes: loadSizes() };
+  }
+  // The scaled copies, worked out fresh from the current choices.
+  function copyWeekPlan() {
+    const c = state.copyWeek, wk = weeksOf(c.from).find((x) => x.week === c.week);
+    const scale = c.pct / 100, shift = daysBetween(c.week, c.toWeek);
+    return (wk ? wk.progs : []).map((p) => {
+      const r = PS.scaleBody(p.body, scale, { prefix: p.id, picks: c.picks, dumbbells: c.sizes.db, kettlebells: c.sizes.kb });
+      return Object.assign(r, { src: p, date: addDays(p.date, shift) });
+    });
+  }
+  function copyWeekHTML() {
+    const c = state.copyWeek;
+    const fromOpts = athletes().filter((a) => ownPrograms(a.email).length).map((a) => `<option value="${esc(a.email)}" ${a.email === c.from ? "selected" : ""}>${esc(a.display_name || a.email)}</option>`).join("");
+    const weekOpts = weeksOf(c.from).map((w) => `<option value="${w.week}" ${w.week === c.week ? "selected" : ""}>${esc(weekLabel(w.week))} · ${w.progs.length} session${w.progs.length > 1 ? "s" : ""}</option>`).join("");
+    const plan = copyWeekPlan(), toName = nameOf(c.to);
+    const clash = plan.filter((x) => state.programs.some((p) => p.athlete_email === c.to && p.date === x.date));
+    let sessions = "";
+    for (const x of plan) {
+      const picks = x.choices.map((ch) => `<label class="cw-pick"><span><b>${esc(ch.label)}</b> ${esc(PSfmt(ch.from))} kg ${ch.kind === "kb" ? "kettlebell" : "dumbbell"} × ${c.pct}% = ${esc(PSfmt(ch.scaled))} kg</span>
+          <select data-cw-pick="${esc(ch.key)}">${ch.options.map((o) => `<option value="${o}" ${o === ch.pick ? "selected" : ""}>${esc(PSfmt(o))} kg</option>`).join("")}</select></label>`).join("");
+      const lines = x.changes.map((ch) => `<li><span class="cw-name">${esc(ch.block || "")} · ${esc(ch.name)}</span><span class="cw-diff">${ch.parts.map((pt) => `<s>${esc(pt.from)}</s> → <b>${esc(pt.to)}</b>`).join("<br>")}</span></li>`).join("");
+      sessions += `<div class="cw-session"><h4>${esc(fmtDate(x.src.date))} → ${esc(fmtDate(x.date))} · ${x.src.body.short ? esc(x.src.body.short) + " · " : ""}${esc(x.src.title)}</h4>
+        ${picks ? `<div class="cw-picks"><div class="extra">Pick the ${x.choices.some((ch) => ch.kind === "kb") ? "dumbbell or kettlebell" : "dumbbell"}${c.pct < 100 ? " to drop to" : c.pct > 100 ? " to go up to" : ""}:</div>${picks}</div>` : ""}
+        ${lines ? `<ul class="cw-changes">${lines}</ul>` : `<div class="extra">Nothing to scale in this one (times, holds and ticks stay as they are).</div>`}</div>`;
+    }
+    return `<section class="card"><div class="card-head"><h3>Copy a week</h3></div>
+      <div class="extra">Every session in the week is added as a new program for the other athlete, on the same weekdays, so both keep their history. Reps scale to the nearest whole rep, bar weights to the nearest 5 kg, and dumbbells and kettlebells to a real size you pick. Sets, times, distances and the first athlete's past loads aren't copied over.</div>
+      <div class="fields cw-fields">
+        <label>From<select id="cw-from">${fromOpts}</select></label>
+        <label>Week<select id="cw-week">${weekOpts}</select></label>
+        <label>To<select id="cw-to">${athleteOptions(c.to)}</select></label>
+        <label>Into the week of<input id="cw-toweek" type="date" value="${esc(c.toWeek)}"></label>
+        <label>Scale %<input id="cw-pct" type="number" min="10" max="300" step="5" inputmode="numeric" value="${c.pct}"></label>
+      </div>
+      <div class="lib-cats">${[60, 70, 80, 90, 100, 110, 120].map((n) => `<button type="button" class="chip-btn${n === c.pct ? " on" : ""}" data-act="copyweek-pct" data-n="${n}">${n}%</button>`).join("")}</div>
+      <details class="cw-sizes"><summary>Dumbbell and kettlebell sizes in your gym</summary>
+        <div class="fields"><label class="wide">Dumbbells (kg)<input id="cw-db" value="${esc(c.sizes.db.join(", "))}"></label>
+        <label class="wide">Kettlebells (kg)<input id="cw-kb" value="${esc(c.sizes.kb.join(", "))}"></label></div></details>
+      ${clash.length ? `<div class="banner warn">${esc(toName)} already has a program on ${[...new Set(clash.map((x) => x.date))].map((d) => esc(fmtDate(d))).join(", ")}. The copies are added alongside, nothing is replaced.</div>` : ""}
+      <div class="cw-list">${sessions || `<div class="extra">No sessions that week.</div>`}</div>
+      <label class="check"><input type="checkbox" id="cw-publish" ${c.publish ? "checked" : ""}> Publish straight away (otherwise they're saved as drafts to check first)</label>
+      <div class="row"><button class="btn" data-act="copyweek-cancel">Cancel</button><button class="btn primary" data-act="copyweek-save" ${plan.length ? "" : "disabled"}>Copy ${plan.length} session${plan.length === 1 ? "" : "s"} to ${esc(toName)}</button></div></section>`;
+  }
+  const PSfmt = (n) => String(Math.round(n * 100) / 100);
+  async function saveCopyWeek() {
+    const c = state.copyWeek, plan = copyWeekPlan(); if (!plan.length) return;
+    const now = new Date().toISOString();
+    const rows = plan.map((x) => ({
+      id: newProgramId(x.date), athlete_email: c.to, date: x.date, title: x.src.title, published: c.publish,
+      body: Object.assign(x.body, { copiedFrom: { program: x.src.id, scale: c.pct } }), created_by_email: state.me, updated_at: now,
+    }));
+    const { error } = await sb.from("programs").insert(rows);
+    if (error) return failed(error);
+    // WOD blocks keep their leaderboard; put the new athlete on it, as saving a program does.
+    if (boardsReady()) {
+      const ups = [];
+      for (const r of rows) for (const b of r.body.blocks || []) if (b && b.board) ups.push({ wod_id: b.board, athlete_email: c.to, added_by_email: state.me });
+      if (ups.length) { const r = await sb.from("wod_board_members").upsert(ups, { onConflict: "wod_id,athlete_email", ignoreDuplicates: true }); if (r.error) console.warn(r.error); }
+    }
+    if (c.publish) for (const r of rows) await notifyWodAgain(r.id, r);
+    saveSizes(c.sizes);
+    state.copyWeek = null; state.athleteFilter = c.to;
+    await loadAll(); render();
+    flash(`Copied ${rows.length} session${rows.length > 1 ? "s" : ""} to ${nameOf(c.to)} at ${c.pct}%${c.publish ? "" : " as drafts"}.`, "ok");
   }
 
   // A new program starts with the usual block layout, empty; drag exercises in from the library.
@@ -880,6 +976,21 @@
     const el = ev.target;
     if (el.dataset.ask != null && state.boardAsk) { state.boardAsk.items[Number(el.dataset.ask)].choice = el.value; return; }
     if (el.id === "reorder-renumber" && state.reorder) { state.reorder.renumber = el.checked; return; }
+    if (state.copyWeek && (el.id || "").startsWith("cw-") || (state.copyWeek && el.dataset.cwPick)) {
+      const c = state.copyWeek;
+      if (el.dataset.cwPick) c.picks[el.dataset.cwPick] = Number(el.value);
+      else if (el.id === "cw-from") { c.from = el.value; const w = weeksOf(c.from); c.week = c.toWeek = (w.find((x) => x.week >= mondayOf(today())) || w[w.length - 1]).week; c.picks = {};
+        if (c.to === c.from) c.to = (athletes().find((a) => a.email !== c.from && a.active) || { email: c.to }).email; }
+      else if (el.id === "cw-week") { c.week = el.value; c.toWeek = el.value; c.picks = {}; }
+      else if (el.id === "cw-to") c.to = el.value;
+      else if (el.id === "cw-toweek") { if (el.value) c.toWeek = mondayOf(el.value); }
+      else if (el.id === "cw-pct") { const n = Math.round(Number(el.value)); if (n >= 10 && n <= 300) { c.pct = n; c.picks = {}; } }
+      else if (el.id === "cw-db" || el.id === "cw-kb") { c.sizes[el.id === "cw-db" ? "db" : "kb"] = PS.parseSizes(el.value, el.id === "cw-db" ? PS.DUMBBELLS : PS.KETTLEBELLS); c.picks = {}; }
+      else if (el.id === "cw-publish") { c.publish = el.checked; return; }
+      const open = !!($(".cw-sizes") && $(".cw-sizes").open);
+      render(); if (open && $(".cw-sizes")) $(".cw-sizes").open = true;
+      return;
+    }
     if (el.name === "capped" && el.form && el.form.id === "result-add") { el.form.elements.score.placeholder = el.checked ? "reps done, e.g. 45" : el.dataset.hint; return; }
     if (el.classList.contains("filter-athlete")) { state.athleteFilter = el.value; render(); return; }
     if (el.id === "program-file" && el.files && el.files[0]) {
@@ -926,6 +1037,10 @@
     } else if (act === "reorder-move") { reorderMove(Number(btn.dataset.i), Number(btn.dataset.i) + Number(btn.dataset.d)); }
     else if (act === "reorder-cancel") { state.reorder = null; render(); }
     else if (act === "reorder-save") { btn.disabled = true; await saveReorder(); }
+    else if (act === "copyweek-start") { state.reorder = null; startCopyWeek(); render(); }
+    else if (act === "copyweek-pct" && state.copyWeek) { state.copyWeek.pct = Number(btn.dataset.n); state.copyWeek.picks = {}; render(); }
+    else if (act === "copyweek-cancel") { state.copyWeek = null; render(); }
+    else if (act === "copyweek-save" && state.copyWeek) { btn.disabled = true; await saveCopyWeek(); }
     else if (act === "duplicate") {
       const p = state.programs.find((x) => x.id === id); if (!p) return;
       const copyId = newProgramId(today());

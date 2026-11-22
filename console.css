@@ -213,3 +213,20 @@ label.file input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .reorder-list .moved .slot{color:var(--accent);font-weight:600}
 .reorder-list button{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:7px;width:30px;height:30px;cursor:pointer}
 .reorder-list button:disabled{opacity:.3;cursor:default}
+
+/* copy a week */
+.cw-fields{grid-template-columns:repeat(auto-fill,minmax(170px,1fr))}
+.cw-sizes summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--info)}
+.cw-sizes .fields{margin-top:8px}
+.cw-list{display:grid;gap:10px}
+.cw-session{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:grid;gap:8px;background:var(--bg)}
+.cw-session h4{margin:0;font:600 17px var(--display);letter-spacing:.01em}
+.cw-picks{display:grid;gap:6px;padding:8px 10px;border-radius:8px;background:var(--warn-soft)}
+.cw-pick{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:14px}
+.cw-pick select{border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);font:600 14px var(--body);padding:5px 8px}
+.cw-changes{list-style:none;margin:0;padding:0;display:grid;gap:2px}
+.cw-changes li{display:flex;justify-content:space-between;gap:12px;padding:5px 8px;border-radius:6px;font-size:13.5px;background:var(--surface)}
+.cw-changes .cw-name{font-weight:600;min-width:0}
+.cw-changes .cw-diff{text-align:right;min-width:0;overflow-wrap:anywhere;white-space:pre-line}
+.cw-changes s{color:var(--muted)}
+@media (max-width:640px){.cw-changes li{flex-direction:column;gap:2px}.cw-changes .cw-diff{text-align:left}}
