@@ -19,7 +19,7 @@ struct SessionDetailView: View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(SessionDate.label(program.date)).foregroundStyle(.secondary)
+                    Text(model.whenLabel(program)).foregroundStyle(.secondary)
                     if program.totalSets > 0 {
                         ProgressView(value: Double(model.doneSets(program)), total: Double(program.totalSets)) {
                             Text("\(model.doneSets(program)) of \(program.totalSets) sets done")

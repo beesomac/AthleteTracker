@@ -75,10 +75,12 @@ nonisolated struct SessionBody: Decodable, Sendable {
     var next: [String] = []
     var planUrl: String?
     var planLabel: String?
+    /// True when the program runs in session order instead of on fixed days (the date only keeps the order).
+    var sequence: Bool = false
 
     init() {}
 
-    enum CodingKeys: String, CodingKey { case short, title, summary, summaryLabel, blocks, next, planUrl, planLabel }
+    enum CodingKeys: String, CodingKey { case short, title, summary, summaryLabel, blocks, next, planUrl, planLabel, sequence }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -90,6 +92,7 @@ nonisolated struct SessionBody: Decodable, Sendable {
         next = (try? c.decode([String].self, forKey: .next)) ?? []
         planUrl = c.lossyString(.planUrl)
         planLabel = c.lossyString(.planLabel)
+        sequence = (try? c.decode(Bool.self, forKey: .sequence)) ?? false
     }
 }
 

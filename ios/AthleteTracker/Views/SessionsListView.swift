@@ -5,8 +5,9 @@ struct SessionsListView: View {
     @Environment(AppModel.self) private var model
 
     private var today: String { SessionDate.today }
-    private var upcoming: [ProgramRow] { model.programs.filter { $0.date >= today } }
-    private var past: [ProgramRow] { model.programs.filter { $0.date < today }.reversed() }
+    // In-order programs (body.sequence) split by done / not done; dated ones by today's date.
+    private var upcoming: [ProgramRow] { model.programs.filter { $0.body.sequence ? !model.isDone($0) : $0.date >= today } }
+    private var past: [ProgramRow] { model.programs.filter { $0.body.sequence ? model.isDone($0) : $0.date < today }.reversed() }
 
     var body: some View {
         NavigationStack {
@@ -40,13 +41,14 @@ struct SessionsListView: View {
 
     private func row(_ p: ProgramRow) -> some View {
         NavigationLink(value: p) {
-            SessionRow(program: p, done: model.doneSets(p), finished: model.finished[p.id] != nil)
+            SessionRow(program: p, when: model.whenLabel(p), done: model.doneSets(p), finished: model.finished[p.id] != nil)
         }
     }
 }
 
 struct SessionRow: View {
     let program: ProgramRow
+    let when: String
     let done: Int
     let finished: Bool
 
@@ -55,7 +57,7 @@ struct SessionRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(program.displayTitle).font(.headline)
                 HStack(spacing: 6) {
-                    Text(SessionDate.label(program.date))
+                    Text(when)
                     if let short = program.body.short, short != program.displayTitle {
                         Text("· \(short)")
                     }

@@ -246,7 +246,26 @@
     if (h === "boards" && info.v2) return { kind: "boards" };
     if (h.startsWith("session-")) { const id = h.slice(8); if (state.sessions.find((s) => s.id === id)) return { kind: "session", id }; }
     const latest = state.sessions[state.sessions.length - 1];
+    // A program that runs in order (no fixed days) opens on the next session not done yet.
+    if (latest && isSeq(latest)) { const nx = nextSeq(); if (nx) return { kind: "session", id: nx.id }; }
     return latest ? { kind: "session", id: latest.id } : { kind: "none" };
+  }
+
+  // Programs with `sequence: true` run in session order: the date only keeps them in order and isn't shown.
+  // A session counts as done once it's finished, or it has ticks from an earlier day (a session ticked
+  // today is still the one being worked on).
+  const isSeq = (s) => !!(s && s.sequence === true);
+  function seqDone(s) {
+    if (state.finishes[s.id]) return true;
+    const d = doneDay(s);
+    return !!d && d < localDay(new Date().toISOString());
+  }
+  function nextSeq() { return state.sessions.find((s) => isSeq(s) && !seqDone(s)) || null; }
+  // "Done 17 Nov", "Up next" or "Not done yet" for an in-order session; the planned or done day otherwise.
+  function seqWhen(s) {
+    if (doneDay(s) || state.finishes[s.id]) return "Done " + fmtDate(sessionDay(s));
+    const nx = nextSeq();
+    return nx && nx.id === s.id ? "Up next" : "Not done yet";
   }
 
   function sessionDay(s) {
@@ -259,7 +278,8 @@
       const st = sessionStats(s);
       const cur = view.kind === "session" && view.id === s.id;
       const finished = !!state.finishes[s.id] || (st.total && st.done === st.total);
-      return `<a href="#session-${esc(s.id)}" ${cur ? 'aria-current="page"' : ""}>${esc(s.short || "Session " + (i + 1))} · ${esc(fmtDate(sessionDay(s)))}${finished ? " ✓" : ""}</a>`;
+      const when = isSeq(s) ? (doneDay(s) || state.finishes[s.id] ? " · " + fmtDate(sessionDay(s)) : "") : " · " + fmtDate(sessionDay(s));
+      return `<a href="#session-${esc(s.id)}" ${cur ? 'aria-current="page"' : ""}>${esc(s.short || "Session " + (i + 1))}${esc(when)}${finished ? " ✓" : ""}</a>`;
     });
     const n = openNotes().length;
     parts.push(`<a href="#records" ${view.kind === "records" ? 'aria-current="page"' : ""}>Records</a>`);
@@ -399,7 +419,7 @@
     const st = sessionStats(s);
     const pct = st.total ? Math.round((st.done / st.total) * 100) : 0;
     let html = `<section class="hero">
-      <div class="eyebrow">${s.short ? esc(s.short) + " · " : ""}${sessionDay(s) !== s.date ? "Done " + esc(fmtDate(sessionDay(s))) + " · planned " + esc(fmtDate(s.date)) : (doneDay(s) ? "Done " : "Planned ") + esc(fmtDate(s.date))}</div>
+      <div class="eyebrow">${s.short ? esc(s.short) + " · " : ""}${isSeq(s) ? esc(seqWhen(s)) : sessionDay(s) !== s.date ? "Done " + esc(fmtDate(sessionDay(s))) + " · planned " + esc(fmtDate(s.date)) : (doneDay(s) ? "Done " : "Planned ") + esc(fmtDate(s.date))}</div>
       <h2>${esc(s.title)}</h2>
       <div class="meter"><div class="bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></div><b>${st.done}/${st.total} sets</b></div>
       ${st.skipped ? `<div class="extra">${st.skipped} exercise${st.skipped > 1 ? "s" : ""} skipped</div>` : ""}
