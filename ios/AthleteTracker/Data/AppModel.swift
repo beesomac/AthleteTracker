@@ -185,4 +185,38 @@ final class AppModel {
     func doneSets(_ program: ProgramRow) -> Int {
         program.body.blocks.flatMap(\.exercises).reduce(0) { $0 + min(doneSets(program, $1), $1.setCount) }
     }
+
+    // MARK: Programs that run in session order (body.sequence)
+
+    /// The latest local day any set in the session was ticked, as "YYYY-MM-DD".
+    func lastTickDay(_ program: ProgramRow) -> String? {
+        program.body.blocks.flatMap(\.exercises)
+            .compactMap { tick(program, $0) }
+            .flatMap { $0.sets.values.compactMap(\.at) }
+            .compactMap { SessionDate.timestamp($0).map(SessionDate.string) }
+            .max()
+    }
+
+    /// Finished, or ticked on an earlier day (a session ticked today is still the one being worked on).
+    func isDone(_ program: ProgramRow) -> Bool {
+        if finished[program.id] != nil { return true }
+        guard let d = lastTickDay(program) else { return false }
+        return d < SessionDate.today
+    }
+
+    /// The first in-order session that isn't done yet.
+    var nextInOrder: ProgramRow? {
+        programs.first { $0.body.sequence && !isDone($0) }
+    }
+
+    /// What to show instead of a date: "Done Mon 17 Nov", "Up next" or "Not done yet" for an in-order
+    /// session; the planned date otherwise.
+    func whenLabel(_ program: ProgramRow) -> String {
+        guard program.body.sequence else { return SessionDate.label(program.date) }
+        if let f = finished[program.id], let at = f.finishedAt, let d = SessionDate.timestamp(at) {
+            return "Done " + SessionDate.label(SessionDate.string(d))
+        }
+        if let d = lastTickDay(program) { return "Done " + SessionDate.label(d) }
+        return nextInOrder?.id == program.id ? "Up next" : "Not done yet"
+    }
 }
