@@ -13,11 +13,12 @@
     login: {}, athleteFilter: "", notesFilter: "open", confirm: null,
     editingMember: null, edit: null, reply: null, editingWod: false, fileIds: null,
     fileSessions: [], librarySeed: null, wodSeed: null, wodDraft: null, pendingWod: null,
-    boardMembers: null, boardAsk: null, reorder: null,   // reorder: { athlete, ids } while reordering programs   // boardMembers null = 007_wod_boards.sql not run yet
+    boardMembers: null, boardAsk: null, reorder: null, copyWeek: null, weekGroup: "",   // reorder: { athlete, ids } while reordering programs   // boardMembers null = 007_wod_boards.sql not run yet
     builder: { query: "", cat: "", target: null, open: new Set(), confirm: null, libTab: "ex", wodGroup: "open", wodInfo: null },
     libPage: { query: "", cat: "", wodGroup: "open", open: null },
   };
   const PB = window.ProgramBuilder;
+  const PS = window.ProgramScale;
 
   // ─── helpers ──────────────────────────────────────────────────────────────────────────
   function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
@@ -115,6 +116,8 @@
   function view() {
     const h = (location.hash || "").slice(1);
     if (h === "programs") return { kind: "programs" };
+    if (h === "week") return { kind: "week", week: null };
+    if (/^week-\d{4}-\d{2}-\d{2}$/.test(h)) return { kind: "week", week: h.slice(5) };
     if (h === "program-new") return { kind: "program", id: null };
     if (h.startsWith("program-")) return { kind: "program", id: decodeURIComponent(h.slice(8)) };
     if (h === "feedback") return { kind: "feedback" };
@@ -132,6 +135,7 @@
     const items = [
       ["athletes", "Athletes", v === "athletes"],
       ["programs", "Programs", v === "programs" || v === "program"],
+      ["week", "Week", v === "week"],
       ["library", "Library", v === "library"],
       ["feedback", `Feedback${open ? ` <span class="count">${open}</span>` : ""}`, v === "feedback"],
       ["boards", "Leaderboards", v === "boards" || v === "board"],
@@ -157,6 +161,7 @@
           <label>Role<select name="role"><option value="athlete" ${m.role === "athlete" ? "selected" : ""}>Athlete</option><option value="trainer" ${m.role === "trainer" ? "selected" : ""}>Trainer</option></select></label>
           <label class="check"><input type="checkbox" name="active" ${m.active ? "checked" : ""}> Can sign in</label>
           ${"also_athlete" in m ? `<label class="check"><input type="checkbox" name="also_athlete" ${m.also_athlete ? "checked" : ""}> Trainer also trains (shows as an athlete)</label>` : ""}
+          ${groupsReady() ? `<label class="wide">Groups<input name="groups" value="${esc((m.groups || []).join(", "))}" placeholder="e.g. Rehab, Morning crew" list="group-names"></label><datalist id="group-names">${allGroups().map((g) => `<option value="${esc(g)}">`).join("")}</datalist>` : ""}
           <div class="row"><button type="button" class="btn" data-act="cancel-member">Cancel</button><button class="btn primary">Save</button></div></form></td></tr>`;
         continue;
       }
@@ -166,7 +171,7 @@
       html += `<tr class="${m.active ? "" : "inactive"}">
         <td data-l="Name"><b>${esc(m.display_name || "")}</b>${m.email === state.me ? ` <span class="extra">(you)</span>` : ""}</td>
         <td data-l="Email" class="mono">${esc(m.email)}</td>
-        <td data-l="Role"><span class="chip ${m.role === "trainer" ? "info" : "back"}">${m.role}</span>${m.role === "trainer" && m.also_athlete ? ` <span class="chip back">athlete</span>` : ""}${m.active ? "" : ` <span class="chip hold">inactive</span>`}</td>
+        <td data-l="Role"><span class="chip ${m.role === "trainer" ? "info" : "back"}">${m.role}</span>${m.role === "trainer" && m.also_athlete ? ` <span class="chip back">athlete</span>` : ""}${m.active ? "" : ` <span class="chip hold">inactive</span>`}${(m.groups || []).map((g) => ` <span class="chip">${esc(g)}</span>`).join("")}</td>
         <td data-l="Programs">${isAthlete(m) ? progs : ""}</td>
         <td data-l="Open notes">${isAthlete(m) ? (open ? `<a href="#feedback" data-act="filter-athlete" data-email="${esc(m.email)}">${open}</a>` : "0") : ""}</td>
         <td data-l="Last finished">${fin ? `${esc(programTitle(fin.session_id))} <span class="extra">${esc(fmtWhen(fin.finished_at))}</span>` : `<span class="extra">–</span>`}</td>
@@ -188,7 +193,9 @@
     let html = `<section class="hero"><div class="eyebrow">Session plans</div><h2>Programs</h2>
       <div class="toolbar"><select class="filter-athlete" aria-label="Athlete">${athleteOptions(f, { all: true })}</select>
         ${f && ownPrograms(f).length > 1 && !state.reorder ? `<button class="btn" data-act="reorder-start">Reorder sessions</button>` : ""}
+        ${!state.copyWeek && athletes().some((a) => ownPrograms(a.email).length) ? `<button class="btn" data-act="copyweek-start">Copy a week</button>` : ""}
         <a class="btn primary" href="#program-new">New program</a></div></section>`;
+    if (state.copyWeek) return html + copyWeekHTML();
     if (state.reorder && state.reorder.athlete === f) return html + reorderHTML();
     state.reorder = null;
     if (missingFiles.length && activeAthletes().length) {
@@ -212,7 +219,7 @@
         <td data-l="Sets">${sets}</td>
         <td data-l="Feedback">${notes ? `${notes} note${notes > 1 ? "s" : ""}` : ""}${notes && fins ? " · " : ""}${fins ? `${fins} finished` : ""}${!notes && !fins ? `<span class="extra">–</span>` : ""}</td>
         <td class="actions"><a class="btn" href="#program-${encodeURIComponent(p.id)}">Edit</a><button class="btn" data-act="toggle-publish" data-id="${esc(p.id)}">${p.published ? "Unpublish" : "Publish"}</button>
-          <button class="btn" data-act="duplicate" data-id="${esc(p.id)}">Duplicate</button>
+          <button class="btn" data-act="copy-session" data-id="${esc(p.id)}">Copy to…</button>
           <button class="btn danger" data-act="del-program" data-id="${esc(p.id)}">${state.confirm === key ? "Tap again to delete" : "Delete"}</button></td></tr>`;
     }
     return html + `</tbody></table></div>`;
@@ -281,6 +288,179 @@
       if (to > from) to--; reorderMove(from, to);
     });
     app.addEventListener("dragend", () => { dragI = null; app.querySelectorAll("#reorder-list .dragging,#reorder-list .drop-before").forEach((x) => x.classList.remove("dragging", "drop-before")); });
+  }
+
+  // ─── copy a week to another athlete, scaled ────────────────────────────────────────────
+  // Every program the source athlete has in one Monday–Sunday week is copied as a NEW program
+  // for the other athlete (nothing is overwritten, so both histories stay), on the same weekdays
+  // of the chosen week. Reps, bar weights and dumbbells are scaled by scale.js; dumbbells and
+  // kettlebells come out as a choice of real sizes, which the trainer confirms here.
+  const SIZES_KEY = "console.weightSizes";
+  function loadSizes() {
+    let saved = {}; try { saved = JSON.parse(localStorage.getItem(SIZES_KEY) || "{}") || {}; } catch (e) { saved = {}; }
+    return { db: PS.parseSizes(saved.db, PS.DUMBBELLS), kb: PS.parseSizes(saved.kb, PS.KETTLEBELLS) };
+  }
+  function saveSizes(sz) { try { localStorage.setItem(SIZES_KEY, JSON.stringify({ db: sz.db.join(", "), kb: sz.kb.join(", ") })); } catch (e) { /* private window */ } }
+  function addDays(iso, n) { const d = new Date(String(iso).slice(0, 10) + "T12:00:00"); d.setDate(d.getDate() + n); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+  function mondayOf(iso) { const d = new Date(String(iso).slice(0, 10) + "T12:00:00"); return addDays(iso, -((d.getDay() + 6) % 7)); }
+  const daysBetween = (a, b) => Math.round((new Date(b + "T12:00:00") - new Date(a + "T12:00:00")) / 864e5);
+  function weeksOf(email) {
+    const m = new Map();
+    for (const p of ownPrograms(email)) { const w = mondayOf(p.date); if (!m.has(w)) m.set(w, []); m.get(w).push(p); }
+    return [...m.entries()].map(([week, progs]) => ({ week, progs }));
+  }
+  const weekLabel = (w) => `${fmtDate(w)} – ${fmtDate(addDays(w, 6))}`;
+  // mode "week": every program the athlete has in a week. mode "session": one program (pid),
+  // which can also be an "All athletes" one. Started from the Programs list or the program editor.
+  function startCopyWeek(mode = "week", pid = null) {
+    const p = pid && state.programs.find((x) => x.id === pid);
+    const withProgs = athletes().filter((a) => ownPrograms(a.email).length);
+    const from = p ? p.athlete_email : (withProgs.find((a) => a.email === state.athleteFilter) || withProgs[0]).email;
+    let w;
+    if (p) w = mondayOf(p.date);
+    else {
+      const weeks = weeksOf(from), thisWeek = mondayOf(today());
+      w = (weeks.find((x) => x.week === thisWeek) || weeks.find((x) => x.week > thisWeek) || weeks[weeks.length - 1]).week;
+    }
+    const to = (athletes().find((a) => a.email !== from && a.active) || { email: from }).email;
+    state.copyWeek = { mode: p && mode === "session" ? "session" : "week", pid: p ? p.id : null, from, week: w, to, toWeek: w, toDate: p ? p.date : w, pct: 80, publish: false, picks: {}, sizes: loadSizes() };
+  }
+  // The scaled copies, worked out fresh from the current choices.
+  function copyWeekPlan() {
+    const c = state.copyWeek, scale = c.pct / 100;
+    const one = c.mode === "session" ? state.programs.find((x) => x.id === c.pid) : null;
+    const progs = c.mode === "session" ? (one ? [one] : []) : ((weeksOf(c.from).find((x) => x.week === c.week) || {}).progs || []);
+    const shift = daysBetween(c.week, c.toWeek);
+    return progs.map((p) => {
+      const r = PS.scaleBody(p.body, scale, { prefix: p.id, picks: c.picks, dumbbells: c.sizes.db, kettlebells: c.sizes.kb });
+      return Object.assign(r, { src: p, date: c.mode === "session" ? c.toDate : addDays(p.date, shift) });
+    });
+  }
+  function copyWeekHTML() {
+    const c = state.copyWeek;
+    const fromOpts = athletes().filter((a) => ownPrograms(a.email).length).map((a) => `<option value="${esc(a.email)}" ${a.email === c.from ? "selected" : ""}>${esc(a.display_name || a.email)}</option>`).join("");
+    const weekOpts = weeksOf(c.from).map((w) => `<option value="${w.week}" ${w.week === c.week ? "selected" : ""}>${esc(weekLabel(w.week))} · ${w.progs.length} session${w.progs.length > 1 ? "s" : ""}</option>`).join("");
+    const plan = copyWeekPlan(), toName = nameOf(c.to);
+    const clash = plan.filter((x) => state.programs.some((p) => p.athlete_email === c.to && p.date === x.date));
+    let sessions = "";
+    for (const x of plan) {
+      const picks = x.choices.map((ch) => `<label class="cw-pick"><span><b>${esc(ch.label)}</b> ${esc(PSfmt(ch.from))} kg ${ch.kind === "kb" ? "kettlebell" : "dumbbell"} × ${c.pct}% = ${esc(PSfmt(ch.scaled))} kg</span>
+          <select data-cw-pick="${esc(ch.key)}">${ch.options.map((o) => `<option value="${o}" ${o === ch.pick ? "selected" : ""}>${esc(PSfmt(o))} kg</option>`).join("")}</select></label>`).join("");
+      const lines = x.changes.map((ch) => `<li><span class="cw-name">${esc(ch.block || "")} · ${esc(ch.name)}</span><span class="cw-diff">${ch.parts.map((pt) => `<s>${esc(pt.from)}</s> → <b>${esc(pt.to)}</b>`).join("<br>")}</span></li>`).join("");
+      sessions += `<div class="cw-session"><h4>${esc(fmtDate(x.src.date))} → ${esc(fmtDate(x.date))} · ${x.src.body.short ? esc(x.src.body.short) + " · " : ""}${esc(x.src.title)}</h4>
+        ${picks ? `<div class="cw-picks"><div class="extra">Pick the ${x.choices.some((ch) => ch.kind === "kb") ? "dumbbell or kettlebell" : "dumbbell"}${c.pct < 100 ? " to drop to" : c.pct > 100 ? " to go up to" : ""}:</div>${picks}</div>` : ""}
+        ${lines ? `<ul class="cw-changes">${lines}</ul>` : `<div class="extra">Nothing to scale in this one (times, holds and ticks stay as they are).</div>`}</div>`;
+    }
+    const single = c.mode === "session", src = single && plan[0] ? plan[0].src : null;
+    const fromFields = single
+      ? `<label class="wide">Session<input readonly value="${src ? esc((src.athlete_email ? nameOf(src.athlete_email) : "All athletes") + " · " + fmtDate(src.date) + " · " + src.title) : "Not found"}"></label>`
+      : `<label>From<select id="cw-from">${fromOpts}</select></label>
+        <label>Week<select id="cw-week">${weekOpts}</select></label>`;
+    const whenField = single ? `<label>On<input id="cw-todate" type="date" value="${esc(c.toDate)}"></label>` : `<label>Into the week of<input id="cw-toweek" type="date" value="${esc(c.toWeek)}"></label>`;
+    return `<section class="card"><div class="card-head"><h3>${single ? "Copy a session" : "Copy a week"}</h3>
+        ${single && src && src.athlete_email ? `<button type="button" class="btn" data-act="copyweek-whole">Copy the whole week instead</button>` : ""}</div>
+      <div class="extra">${single ? "The session is added as a new program for the athlete you pick, on the date you pick" : "Every session in the week is added as a new program for the other athlete, on the same weekdays"}, so both keep their history. It copies the saved version. Reps scale to the nearest whole rep, bar weights to the nearest 5 kg, and dumbbells and kettlebells to a real size you pick. Sets, times, distances and the first athlete's past loads aren't copied over.</div>
+      <div class="fields cw-fields">
+        ${fromFields}
+        <label>To<select id="cw-to">${athleteOptions(c.to)}</select></label>
+        ${whenField}
+        <label>Scale %<input id="cw-pct" type="number" min="10" max="300" step="5" inputmode="numeric" value="${c.pct}"></label>
+      </div>
+      <div class="lib-cats">${[60, 70, 80, 90, 100, 110, 120].map((n) => `<button type="button" class="chip-btn${n === c.pct ? " on" : ""}" data-act="copyweek-pct" data-n="${n}">${n}%</button>`).join("")}</div>
+      <details class="cw-sizes"><summary>Dumbbell and kettlebell sizes in your gym</summary>
+        <div class="fields"><label class="wide">Dumbbells (kg)<input id="cw-db" value="${esc(c.sizes.db.join(", "))}"></label>
+        <label class="wide">Kettlebells (kg)<input id="cw-kb" value="${esc(c.sizes.kb.join(", "))}"></label></div></details>
+      ${clash.length ? `<div class="banner warn">${esc(toName)} already has a program on ${[...new Set(clash.map((x) => x.date))].map((d) => esc(fmtDate(d))).join(", ")}. The copies are added alongside, nothing is replaced.</div>` : ""}
+      <div class="cw-list">${sessions || `<div class="extra">No sessions that week.</div>`}</div>
+      <label class="check"><input type="checkbox" id="cw-publish" ${c.publish ? "checked" : ""}> Publish straight away (otherwise they're saved as drafts to check first)</label>
+      <div class="row"><button class="btn" data-act="copyweek-cancel">Cancel</button><button class="btn primary" data-act="copyweek-save" ${plan.length ? "" : "disabled"}>Copy ${plan.length} session${plan.length === 1 ? "" : "s"} to ${esc(toName)}</button></div></section>`;
+  }
+  const PSfmt = (n) => String(Math.round(n * 100) / 100);
+  async function saveCopyWeek() {
+    const c = state.copyWeek, plan = copyWeekPlan(); if (!plan.length) return;
+    const now = new Date().toISOString();
+    const rows = plan.map((x) => ({
+      id: newProgramId(x.date), athlete_email: c.to, date: x.date, title: x.src.title, published: c.publish,
+      body: Object.assign(x.body, { copiedFrom: { program: x.src.id, scale: c.pct } }), created_by_email: state.me, updated_at: now,
+    }));
+    const { error } = await sb.from("programs").insert(rows);
+    if (error) return failed(error);
+    // WOD blocks keep their leaderboard; put the new athlete on it, as saving a program does.
+    if (boardsReady()) {
+      const ups = [];
+      for (const r of rows) for (const b of r.body.blocks || []) if (b && b.board) ups.push({ wod_id: b.board, athlete_email: c.to, added_by_email: state.me });
+      if (ups.length) { const r = await sb.from("wod_board_members").upsert(ups, { onConflict: "wod_id,athlete_email", ignoreDuplicates: true }); if (r.error) console.warn(r.error); }
+    }
+    if (c.publish) for (const r of rows) await notifyWodAgain(r.id, r);
+    saveSizes(c.sizes);
+    state.copyWeek = null; state.athleteFilter = c.to;
+    await loadAll();
+    if (c.returnTo) location.hash = c.returnTo; else render();
+    flash(`Copied ${rows.length} session${rows.length > 1 ? "s" : ""} to ${nameOf(c.to)} at ${c.pct}%${c.publish ? "" : " as drafts"}.`, "ok");
+  }
+
+  // ─── week board: every athlete's week side by side ─────────────────────────────────────
+  // One row per athlete, one column per day. Drag a session to another day in the same row to
+  // move it, or onto another athlete to copy it there (the copy screen opens with the scaling).
+  // "Copy week" on a row copies that athlete's whole week. Groups come from 012_member_groups.sql.
+  const groupsReady = () => state.members.some((m) => Array.isArray(m.groups));
+  const allGroups = () => [...new Set(state.members.flatMap((m) => m.groups || []))].sort((a, b) => a.localeCompare(b));
+  function renderWeek(v) {
+    const wk = mondayOf(v.week || today()), days = [0, 1, 2, 3, 4, 5, 6].map((i) => addDays(wk, i));
+    const groups = groupsReady() ? allGroups() : [];
+    if (state.weekGroup && !groups.includes(state.weekGroup)) state.weekGroup = "";
+    const rows = activeAthletes().filter((a) => !state.weekGroup || (a.groups || []).includes(state.weekGroup));
+    const inWeek = (p) => p.date >= days[0] && p.date <= days[6];
+    const chip = (p, own) => `<a class="wk-chip${p.published ? "" : " draft"}${own ? "" : " shared"}" href="#program-${encodeURIComponent(p.id)}" draggable="true" data-pid="${esc(p.id)}" title="${esc(p.title)}${p.published ? "" : " (draft)"}">
+        ${p.body && p.body.short ? `<span class="wk-short">${esc(p.body.short)}</span>` : ""}<span class="wk-title">${esc(p.title)}</span>${p.published ? "" : `<span class="wk-draft">draft</span>`}</a>`;
+    const head = `<tr><th></th>${days.map((d) => `<th class="${d === today() ? "today" : ""}">${esc(fmtDate(d))}</th>`).join("")}</tr>`;
+    const everyone = state.programs.filter((p) => !p.athlete_email && inWeek(p));
+    let body = everyone.length ? `<tr class="wk-everyone"><th><b>All athletes</b><span class="extra">drag to copy to one athlete</span></th>${days.map((d) => `<td>${everyone.filter((p) => p.date === d).map((p) => chip(p, false)).join("")}</td>`).join("")}</tr>` : "";
+    for (const a of rows) {
+      const mine = state.programs.filter((p) => p.athlete_email === a.email && inWeek(p));
+      body += `<tr><th><b>${esc(a.display_name || a.email)}</b>${(a.groups || []).length ? `<span class="extra">${esc(a.groups.join(", "))}</span>` : ""}
+          ${mine.length ? `<button type="button" class="link" data-act="copy-week-row" data-email="${esc(a.email)}" data-week="${wk}">Copy week…</button>` : ""}</th>
+        ${days.map((d) => `<td class="wk-cell" data-email="${esc(a.email)}" data-date="${d}">${mine.filter((p) => p.date === d).sort((x, y) => String(x.id).localeCompare(String(y.id))).map((p) => chip(p, true)).join("")}</td>`).join("")}</tr>`;
+    }
+    if (!rows.length) body += `<tr><td colspan="8"><div class="extra">No active athletes${state.weekGroup ? " in " + esc(state.weekGroup) : ""}.</div></td></tr>`;
+    return `<section class="hero"><div class="eyebrow">All athletes</div><h2>Week</h2>
+      <div class="toolbar"><a class="btn" href="#week-${addDays(wk, -7)}" aria-label="Previous week">‹</a><span class="wk-label">${esc(weekLabel(wk))}</span><a class="btn" href="#week-${addDays(wk, 7)}" aria-label="Next week">›</a>
+        ${wk !== mondayOf(today()) ? `<a class="btn" href="#week">This week</a>` : ""}</div>
+      ${groups.length ? `<div class="lib-cats wk-groups"><button type="button" class="chip-btn${state.weekGroup ? "" : " on"}" data-act="week-group" data-g="">Everyone</button>${groups.map((g) => `<button type="button" class="chip-btn${g === state.weekGroup ? " on" : ""}" data-act="week-group" data-g="${esc(g)}">${esc(g)}</button>`).join("")}</div>`
+        : `<div class="extra">${groupsReady() ? "Add athletes to groups (Athletes → Edit) to filter this board." : "Run supabase/012_member_groups.sql to put athletes in groups and filter this board."}</div>`}
+      <div class="extra">Drag a session to another day to move it, or onto another athlete to copy it there, scaled. Tap a session to open it.</div></section>
+      <div class="card table-card wk-card"><div class="wk-scroll"><table class="wk-grid">${head}${body}</table></div></div>`;
+  }
+  // Drag and drop on the week board.
+  {
+    let dragPid = null;
+    app.addEventListener("dragstart", (ev) => {
+      const c = ev.target.closest && ev.target.closest(".wk-chip"); if (!c) return;
+      dragPid = c.dataset.pid; c.classList.add("dragging"); ev.dataTransfer.effectAllowed = "copyMove"; ev.dataTransfer.setData("text/plain", dragPid);
+    });
+    app.addEventListener("dragover", (ev) => {
+      if (!dragPid) return; const cell = ev.target.closest && ev.target.closest(".wk-cell"); if (!cell) return;
+      ev.preventDefault();
+      const p = state.programs.find((x) => x.id === dragPid);
+      ev.dataTransfer.dropEffect = p && p.athlete_email === cell.dataset.email ? "move" : "copy";
+      app.querySelectorAll(".wk-cell.over").forEach((x) => x !== cell && x.classList.remove("over")); cell.classList.add("over");
+    });
+    app.addEventListener("drop", async (ev) => {
+      if (!dragPid) return; const cell = ev.target.closest && ev.target.closest(".wk-cell"); if (!cell) return;
+      ev.preventDefault();
+      const pid = dragPid; dragPid = null;
+      const p = state.programs.find((x) => x.id === pid); if (!p) return;
+      const { email, date } = cell.dataset;
+      if (p.athlete_email === email) {
+        if (p.date === date) { render(); return; }
+        await run(sb.from("programs").update({ date, updated_at: new Date().toISOString() }).eq("id", pid), `Moved ${p.title} to ${fmtDate(date)}.`);
+        return;
+      }
+      startCopyWeek("session", pid);
+      Object.assign(state.copyWeek, { to: email, toDate: date, returnTo: location.hash.slice(1) || "week" });
+      location.hash = "programs";
+    });
+    app.addEventListener("dragend", () => { dragPid = null; app.querySelectorAll(".wk-chip.dragging,.wk-cell.over").forEach((x) => x.classList.remove("dragging", "over")); });
   }
 
   // A new program starts with the usual block layout, empty; drag exercises in from the library.
@@ -544,7 +724,9 @@
     if (!state.edit || state.edit.id !== v.id) if (!startEdit(v.id)) return `<div class="empty"><strong>Program not found</strong><span><a href="#programs">Back to programs</a></span></div>`;
     const e = state.edit;
     const chk = checkProgram(e.text);
-    return `<section class="hero"><div class="eyebrow"><a href="#programs">Programs</a> /</div><h2>${e.id ? "Edit program" : "New program"}</h2></section>
+    const saved = e.id && state.programs.find((p) => p.id === e.id);
+    return `<section class="hero"><div class="eyebrow"><a href="#programs">Programs</a> /</div><h2>${e.id ? "Edit program" : "New program"}</h2>
+      ${saved ? `<div class="toolbar"><button type="button" class="btn" data-act="copy-session" data-id="${esc(e.id)}" title="Copy this session to another athlete or date, scaled">Copy session to…</button>${saved.athlete_email ? `<button type="button" class="btn" data-act="copy-week-of" data-id="${esc(e.id)}" title="Copy every session in this week to another athlete, scaled">Copy week to…</button>` : ""}</div>` : ""}</section>
       <form id="program-form" class="editor">
         <div class="card fields">
           <label>Athlete<select name="athlete">${athleteOptions(e.athlete, { all: true })}</select></label>
@@ -747,6 +929,7 @@
     else if (state.role !== "trainer") html = `<div class="empty"><strong>Not on the list</strong><span>${esc(state.me)} isn't set up as a trainer. <button class="signout" data-act="signout">Sign out</button></span></div>`;
     else if (!state.loaded) html = `<div class="hero"><div class="eyebrow">Loading</div><h2>Opening the console…</h2></div><div class="skeleton"></div>`;
     else if (v.kind === "programs") html = renderPrograms();
+    else if (v.kind === "week") html = renderWeek(v);
     else if (v.kind === "program") {
       html = renderProgram(v);
       if (state.askAfterRender != null && state.edit) { const bi = state.askAfterRender; state.askAfterRender = null; openBoardAsk([bi], state.edit.athlete || null, { onSave: false }); return; }
@@ -789,6 +972,7 @@
         state.editingMember = null;
         const upd = { display_name: val(f, "name"), role: val(f, "role"), active: checked(f, "active") };
         if (f.elements.also_athlete) upd.also_athlete = upd.role === "trainer" && checked(f, "also_athlete");
+        if (f.elements.groups) upd.groups = [...new Set(val(f, "groups").split(",").map((g) => g.trim()).filter(Boolean))];
         await run(sb.from("members").update(upd).eq("email", email));
       } else if (f.id === "program-form") {
         const e = state.edit; const chk = checkProgram(e.text);
@@ -880,6 +1064,22 @@
     const el = ev.target;
     if (el.dataset.ask != null && state.boardAsk) { state.boardAsk.items[Number(el.dataset.ask)].choice = el.value; return; }
     if (el.id === "reorder-renumber" && state.reorder) { state.reorder.renumber = el.checked; return; }
+    if (state.copyWeek && (el.id || "").startsWith("cw-") || (state.copyWeek && el.dataset.cwPick)) {
+      const c = state.copyWeek;
+      if (el.dataset.cwPick) c.picks[el.dataset.cwPick] = Number(el.value);
+      else if (el.id === "cw-from") { c.from = el.value; const w = weeksOf(c.from); c.week = c.toWeek = (w.find((x) => x.week >= mondayOf(today())) || w[w.length - 1]).week; c.picks = {};
+        if (c.to === c.from) c.to = (athletes().find((a) => a.email !== c.from && a.active) || { email: c.to }).email; }
+      else if (el.id === "cw-week") { c.week = el.value; c.toWeek = el.value; c.picks = {}; }
+      else if (el.id === "cw-to") c.to = el.value;
+      else if (el.id === "cw-toweek") { if (el.value) c.toWeek = mondayOf(el.value); }
+      else if (el.id === "cw-todate") { if (el.value) c.toDate = el.value; }
+      else if (el.id === "cw-pct") { const n = Math.round(Number(el.value)); if (n >= 10 && n <= 300) { c.pct = n; c.picks = {}; } }
+      else if (el.id === "cw-db" || el.id === "cw-kb") { c.sizes[el.id === "cw-db" ? "db" : "kb"] = PS.parseSizes(el.value, el.id === "cw-db" ? PS.DUMBBELLS : PS.KETTLEBELLS); c.picks = {}; }
+      else if (el.id === "cw-publish") { c.publish = el.checked; return; }
+      const open = !!($(".cw-sizes") && $(".cw-sizes").open);
+      render(); if (open && $(".cw-sizes")) $(".cw-sizes").open = true;
+      return;
+    }
     if (el.name === "capped" && el.form && el.form.id === "result-add") { el.form.elements.score.placeholder = el.checked ? "reps done, e.g. 45" : el.dataset.hint; return; }
     if (el.classList.contains("filter-athlete")) { state.athleteFilter = el.value; render(); return; }
     if (el.id === "program-file" && el.files && el.files[0]) {
@@ -926,6 +1126,23 @@
     } else if (act === "reorder-move") { reorderMove(Number(btn.dataset.i), Number(btn.dataset.i) + Number(btn.dataset.d)); }
     else if (act === "reorder-cancel") { state.reorder = null; render(); }
     else if (act === "reorder-save") { btn.disabled = true; await saveReorder(); }
+    else if (act === "copyweek-start" || act === "copy-session" || act === "copy-week-of") {
+      // From a program row or the editor: btn.dataset.id is the program.
+      state.reorder = null; state.edit = null;
+      startCopyWeek(act === "copy-session" ? "session" : "week", id || null);
+      if (location.hash !== "#programs") location.hash = "programs"; else render();
+    }
+    else if (act === "copyweek-whole" && state.copyWeek) { startCopyWeek("week", state.copyWeek.pid); render(); }
+    else if (act === "copyweek-pct" && state.copyWeek) { state.copyWeek.pct = Number(btn.dataset.n); state.copyWeek.picks = {}; render(); }
+    else if (act === "copyweek-cancel") { const back = state.copyWeek && state.copyWeek.returnTo; state.copyWeek = null; if (back) location.hash = back; else render(); }
+    else if (act === "week-group") { state.weekGroup = btn.dataset.g || ""; render(); }
+    else if (act === "copy-week-row") {
+      startCopyWeek("week");
+      const c = state.copyWeek; c.from = btn.dataset.email; c.week = c.toWeek = btn.dataset.week; c.picks = {};
+      if (c.to === c.from) c.to = (athletes().find((a) => a.email !== c.from && a.active) || { email: c.to }).email;
+      c.returnTo = location.hash.slice(1) || "week"; location.hash = "programs";
+    }
+    else if (act === "copyweek-save" && state.copyWeek) { btn.disabled = true; await saveCopyWeek(); }
     else if (act === "duplicate") {
       const p = state.programs.find((x) => x.id === id); if (!p) return;
       const copyId = newProgramId(today());
