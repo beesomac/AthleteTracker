@@ -13,7 +13,7 @@
     login: {}, athleteFilter: "", notesFilter: "open", confirm: null,
     editingMember: null, edit: null, reply: null, editingWod: false, fileIds: null,
     fileSessions: [], librarySeed: null, wodSeed: null, wodDraft: null, pendingWod: null,
-    boardMembers: null, boardAsk: null, reorder: null, copyWeek: null,   // reorder: { athlete, ids } while reordering programs   // boardMembers null = 007_wod_boards.sql not run yet
+    boardMembers: null, boardAsk: null, reorder: null, copyWeek: null, weekGroup: "",   // reorder: { athlete, ids } while reordering programs   // boardMembers null = 007_wod_boards.sql not run yet
     builder: { query: "", cat: "", target: null, open: new Set(), confirm: null, libTab: "ex", wodGroup: "open", wodInfo: null },
     libPage: { query: "", cat: "", wodGroup: "open", open: null },
   };
@@ -116,6 +116,8 @@
   function view() {
     const h = (location.hash || "").slice(1);
     if (h === "programs") return { kind: "programs" };
+    if (h === "week") return { kind: "week", week: null };
+    if (/^week-\d{4}-\d{2}-\d{2}$/.test(h)) return { kind: "week", week: h.slice(5) };
     if (h === "program-new") return { kind: "program", id: null };
     if (h.startsWith("program-")) return { kind: "program", id: decodeURIComponent(h.slice(8)) };
     if (h === "feedback") return { kind: "feedback" };
@@ -133,6 +135,7 @@
     const items = [
       ["athletes", "Athletes", v === "athletes"],
       ["programs", "Programs", v === "programs" || v === "program"],
+      ["week", "Week", v === "week"],
       ["library", "Library", v === "library"],
       ["feedback", `Feedback${open ? ` <span class="count">${open}</span>` : ""}`, v === "feedback"],
       ["boards", "Leaderboards", v === "boards" || v === "board"],
@@ -158,6 +161,7 @@
           <label>Role<select name="role"><option value="athlete" ${m.role === "athlete" ? "selected" : ""}>Athlete</option><option value="trainer" ${m.role === "trainer" ? "selected" : ""}>Trainer</option></select></label>
           <label class="check"><input type="checkbox" name="active" ${m.active ? "checked" : ""}> Can sign in</label>
           ${"also_athlete" in m ? `<label class="check"><input type="checkbox" name="also_athlete" ${m.also_athlete ? "checked" : ""}> Trainer also trains (shows as an athlete)</label>` : ""}
+          ${groupsReady() ? `<label class="wide">Groups<input name="groups" value="${esc((m.groups || []).join(", "))}" placeholder="e.g. Rehab, Morning crew" list="group-names"></label><datalist id="group-names">${allGroups().map((g) => `<option value="${esc(g)}">`).join("")}</datalist>` : ""}
           <div class="row"><button type="button" class="btn" data-act="cancel-member">Cancel</button><button class="btn primary">Save</button></div></form></td></tr>`;
         continue;
       }
@@ -167,7 +171,7 @@
       html += `<tr class="${m.active ? "" : "inactive"}">
         <td data-l="Name"><b>${esc(m.display_name || "")}</b>${m.email === state.me ? ` <span class="extra">(you)</span>` : ""}</td>
         <td data-l="Email" class="mono">${esc(m.email)}</td>
-        <td data-l="Role"><span class="chip ${m.role === "trainer" ? "info" : "back"}">${m.role}</span>${m.role === "trainer" && m.also_athlete ? ` <span class="chip back">athlete</span>` : ""}${m.active ? "" : ` <span class="chip hold">inactive</span>`}</td>
+        <td data-l="Role"><span class="chip ${m.role === "trainer" ? "info" : "back"}">${m.role}</span>${m.role === "trainer" && m.also_athlete ? ` <span class="chip back">athlete</span>` : ""}${m.active ? "" : ` <span class="chip hold">inactive</span>`}${(m.groups || []).map((g) => ` <span class="chip">${esc(g)}</span>`).join("")}</td>
         <td data-l="Programs">${isAthlete(m) ? progs : ""}</td>
         <td data-l="Open notes">${isAthlete(m) ? (open ? `<a href="#feedback" data-act="filter-athlete" data-email="${esc(m.email)}">${open}</a>` : "0") : ""}</td>
         <td data-l="Last finished">${fin ? `${esc(programTitle(fin.session_id))} <span class="extra">${esc(fmtWhen(fin.finished_at))}</span>` : `<span class="extra">–</span>`}</td>
@@ -390,8 +394,73 @@
     if (c.publish) for (const r of rows) await notifyWodAgain(r.id, r);
     saveSizes(c.sizes);
     state.copyWeek = null; state.athleteFilter = c.to;
-    await loadAll(); render();
+    await loadAll();
+    if (c.returnTo) location.hash = c.returnTo; else render();
     flash(`Copied ${rows.length} session${rows.length > 1 ? "s" : ""} to ${nameOf(c.to)} at ${c.pct}%${c.publish ? "" : " as drafts"}.`, "ok");
+  }
+
+  // ─── week board: every athlete's week side by side ─────────────────────────────────────
+  // One row per athlete, one column per day. Drag a session to another day in the same row to
+  // move it, or onto another athlete to copy it there (the copy screen opens with the scaling).
+  // "Copy week" on a row copies that athlete's whole week. Groups come from 012_member_groups.sql.
+  const groupsReady = () => state.members.some((m) => Array.isArray(m.groups));
+  const allGroups = () => [...new Set(state.members.flatMap((m) => m.groups || []))].sort((a, b) => a.localeCompare(b));
+  function renderWeek(v) {
+    const wk = mondayOf(v.week || today()), days = [0, 1, 2, 3, 4, 5, 6].map((i) => addDays(wk, i));
+    const groups = groupsReady() ? allGroups() : [];
+    if (state.weekGroup && !groups.includes(state.weekGroup)) state.weekGroup = "";
+    const rows = activeAthletes().filter((a) => !state.weekGroup || (a.groups || []).includes(state.weekGroup));
+    const inWeek = (p) => p.date >= days[0] && p.date <= days[6];
+    const chip = (p, own) => `<a class="wk-chip${p.published ? "" : " draft"}${own ? "" : " shared"}" href="#program-${encodeURIComponent(p.id)}" draggable="true" data-pid="${esc(p.id)}" title="${esc(p.title)}${p.published ? "" : " (draft)"}">
+        ${p.body && p.body.short ? `<span class="wk-short">${esc(p.body.short)}</span>` : ""}<span class="wk-title">${esc(p.title)}</span>${p.published ? "" : `<span class="wk-draft">draft</span>`}</a>`;
+    const head = `<tr><th></th>${days.map((d) => `<th class="${d === today() ? "today" : ""}">${esc(fmtDate(d))}</th>`).join("")}</tr>`;
+    const everyone = state.programs.filter((p) => !p.athlete_email && inWeek(p));
+    let body = everyone.length ? `<tr class="wk-everyone"><th><b>All athletes</b><span class="extra">drag to copy to one athlete</span></th>${days.map((d) => `<td>${everyone.filter((p) => p.date === d).map((p) => chip(p, false)).join("")}</td>`).join("")}</tr>` : "";
+    for (const a of rows) {
+      const mine = state.programs.filter((p) => p.athlete_email === a.email && inWeek(p));
+      body += `<tr><th><b>${esc(a.display_name || a.email)}</b>${(a.groups || []).length ? `<span class="extra">${esc(a.groups.join(", "))}</span>` : ""}
+          ${mine.length ? `<button type="button" class="link" data-act="copy-week-row" data-email="${esc(a.email)}" data-week="${wk}">Copy week…</button>` : ""}</th>
+        ${days.map((d) => `<td class="wk-cell" data-email="${esc(a.email)}" data-date="${d}">${mine.filter((p) => p.date === d).sort((x, y) => String(x.id).localeCompare(String(y.id))).map((p) => chip(p, true)).join("")}</td>`).join("")}</tr>`;
+    }
+    if (!rows.length) body += `<tr><td colspan="8"><div class="extra">No active athletes${state.weekGroup ? " in " + esc(state.weekGroup) : ""}.</div></td></tr>`;
+    return `<section class="hero"><div class="eyebrow">All athletes</div><h2>Week</h2>
+      <div class="toolbar"><a class="btn" href="#week-${addDays(wk, -7)}" aria-label="Previous week">‹</a><span class="wk-label">${esc(weekLabel(wk))}</span><a class="btn" href="#week-${addDays(wk, 7)}" aria-label="Next week">›</a>
+        ${wk !== mondayOf(today()) ? `<a class="btn" href="#week">This week</a>` : ""}</div>
+      ${groups.length ? `<div class="lib-cats wk-groups"><button type="button" class="chip-btn${state.weekGroup ? "" : " on"}" data-act="week-group" data-g="">Everyone</button>${groups.map((g) => `<button type="button" class="chip-btn${g === state.weekGroup ? " on" : ""}" data-act="week-group" data-g="${esc(g)}">${esc(g)}</button>`).join("")}</div>`
+        : `<div class="extra">${groupsReady() ? "Add athletes to groups (Athletes → Edit) to filter this board." : "Run supabase/012_member_groups.sql to put athletes in groups and filter this board."}</div>`}
+      <div class="extra">Drag a session to another day to move it, or onto another athlete to copy it there, scaled. Tap a session to open it.</div></section>
+      <div class="card table-card wk-card"><div class="wk-scroll"><table class="wk-grid">${head}${body}</table></div></div>`;
+  }
+  // Drag and drop on the week board.
+  {
+    let dragPid = null;
+    app.addEventListener("dragstart", (ev) => {
+      const c = ev.target.closest && ev.target.closest(".wk-chip"); if (!c) return;
+      dragPid = c.dataset.pid; c.classList.add("dragging"); ev.dataTransfer.effectAllowed = "copyMove"; ev.dataTransfer.setData("text/plain", dragPid);
+    });
+    app.addEventListener("dragover", (ev) => {
+      if (!dragPid) return; const cell = ev.target.closest && ev.target.closest(".wk-cell"); if (!cell) return;
+      ev.preventDefault();
+      const p = state.programs.find((x) => x.id === dragPid);
+      ev.dataTransfer.dropEffect = p && p.athlete_email === cell.dataset.email ? "move" : "copy";
+      app.querySelectorAll(".wk-cell.over").forEach((x) => x !== cell && x.classList.remove("over")); cell.classList.add("over");
+    });
+    app.addEventListener("drop", async (ev) => {
+      if (!dragPid) return; const cell = ev.target.closest && ev.target.closest(".wk-cell"); if (!cell) return;
+      ev.preventDefault();
+      const pid = dragPid; dragPid = null;
+      const p = state.programs.find((x) => x.id === pid); if (!p) return;
+      const { email, date } = cell.dataset;
+      if (p.athlete_email === email) {
+        if (p.date === date) { render(); return; }
+        await run(sb.from("programs").update({ date, updated_at: new Date().toISOString() }).eq("id", pid), `Moved ${p.title} to ${fmtDate(date)}.`);
+        return;
+      }
+      startCopyWeek("session", pid);
+      Object.assign(state.copyWeek, { to: email, toDate: date, returnTo: location.hash.slice(1) || "week" });
+      location.hash = "programs";
+    });
+    app.addEventListener("dragend", () => { dragPid = null; app.querySelectorAll(".wk-chip.dragging,.wk-cell.over").forEach((x) => x.classList.remove("dragging", "over")); });
   }
 
   // A new program starts with the usual block layout, empty; drag exercises in from the library.
@@ -860,6 +929,7 @@
     else if (state.role !== "trainer") html = `<div class="empty"><strong>Not on the list</strong><span>${esc(state.me)} isn't set up as a trainer. <button class="signout" data-act="signout">Sign out</button></span></div>`;
     else if (!state.loaded) html = `<div class="hero"><div class="eyebrow">Loading</div><h2>Opening the console…</h2></div><div class="skeleton"></div>`;
     else if (v.kind === "programs") html = renderPrograms();
+    else if (v.kind === "week") html = renderWeek(v);
     else if (v.kind === "program") {
       html = renderProgram(v);
       if (state.askAfterRender != null && state.edit) { const bi = state.askAfterRender; state.askAfterRender = null; openBoardAsk([bi], state.edit.athlete || null, { onSave: false }); return; }
@@ -902,6 +972,7 @@
         state.editingMember = null;
         const upd = { display_name: val(f, "name"), role: val(f, "role"), active: checked(f, "active") };
         if (f.elements.also_athlete) upd.also_athlete = upd.role === "trainer" && checked(f, "also_athlete");
+        if (f.elements.groups) upd.groups = [...new Set(val(f, "groups").split(",").map((g) => g.trim()).filter(Boolean))];
         await run(sb.from("members").update(upd).eq("email", email));
       } else if (f.id === "program-form") {
         const e = state.edit; const chk = checkProgram(e.text);
@@ -1063,7 +1134,14 @@
     }
     else if (act === "copyweek-whole" && state.copyWeek) { startCopyWeek("week", state.copyWeek.pid); render(); }
     else if (act === "copyweek-pct" && state.copyWeek) { state.copyWeek.pct = Number(btn.dataset.n); state.copyWeek.picks = {}; render(); }
-    else if (act === "copyweek-cancel") { state.copyWeek = null; render(); }
+    else if (act === "copyweek-cancel") { const back = state.copyWeek && state.copyWeek.returnTo; state.copyWeek = null; if (back) location.hash = back; else render(); }
+    else if (act === "week-group") { state.weekGroup = btn.dataset.g || ""; render(); }
+    else if (act === "copy-week-row") {
+      startCopyWeek("week");
+      const c = state.copyWeek; c.from = btn.dataset.email; c.week = c.toWeek = btn.dataset.week; c.picks = {};
+      if (c.to === c.from) c.to = (athletes().find((a) => a.email !== c.from && a.active) || { email: c.to }).email;
+      c.returnTo = location.hash.slice(1) || "week"; location.hash = "programs";
+    }
     else if (act === "copyweek-save" && state.copyWeek) { btn.disabled = true; await saveCopyWeek(); }
     else if (act === "duplicate") {
       const p = state.programs.find((x) => x.id === id); if (!p) return;
