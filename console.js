@@ -323,7 +323,33 @@
       w = (weeks.find((x) => x.week === thisWeek) || weeks.find((x) => x.week > thisWeek) || weeks[weeks.length - 1]).week;
     }
     const to = (athletes().find((a) => a.email !== from && a.active) || { email: from }).email;
-    state.copyWeek = { mode: p && mode === "session" ? "session" : "week", pid: p ? p.id : null, from, week: w, to, toWeek: w, toDate: p ? p.date : w, pct: 80, publish: false, picks: {}, sizes: loadSizes() };
+    state.copyWeek = { mode: p && mode === "session" ? "session" : "week", pid: p ? p.id : null, from, week: w, to, toWeek: w, toDate: p ? p.date : w, pct: 80, publish: false, picks: {}, sizes: loadSizes(), ...freshLines() };
+  }
+  // Line-by-line overrides on top of the scaling, keyed "<program id>|<block index>|<exercise index or note>":
+  //   edits[key + "|" + field] = what the trainer typed (sets, target, suggestKg, extra, note)
+  //   undo[key] = keep this line exactly as the original;  skip[program id] = don't copy that session
+  //   dates[program id] = a different date for that session;  all[program id] = show unchanged lines too
+  function freshLines() { return { edits: {}, undo: {}, skip: {}, dates: {}, all: {} }; }
+  const LINE_FIELDS = ["sets", "target", "suggestKg", "extra"];
+  function applyLineEdits(c, p, body) {
+    const src = p.body || {};
+    (body.blocks || []).forEach((b, bi) => {
+      const sb0 = (src.blocks || [])[bi] || {};
+      (b.exercises || []).forEach((ex, ei) => {
+        const key = `${p.id}|${bi}|${ei}`, orig = (sb0.exercises || [])[ei] || {};
+        if (c.undo[key]) { for (const f of LINE_FIELDS) { if (orig[f] === undefined) delete ex[f]; else ex[f] = orig[f]; } return; }
+        for (const f of LINE_FIELDS) {
+          const v = c.edits[key + "|" + f]; if (v === undefined) continue;
+          if (v === "") delete ex[f];
+          else ex[f] = f === "sets" ? Math.max(1, Math.round(Number(v)) || 1) : f === "suggestKg" ? (isFinite(Number(v)) ? Number(v) : ex[f]) : v;
+        }
+      });
+      if (b.note != null) {
+        const key = `${p.id}|${bi}|note`;
+        if (c.undo[key]) b.note = sb0.note; else if (c.edits[key + "|note"] !== undefined) b.note = c.edits[key + "|note"];
+      }
+    });
+    return body;
   }
   // The scaled copies, worked out fresh from the current choices.
   function copyWeekPlan() {
@@ -333,23 +359,74 @@
     const shift = daysBetween(c.week, c.toWeek);
     return progs.map((p) => {
       const r = PS.scaleBody(p.body, scale, { prefix: p.id, picks: c.picks, dumbbells: c.sizes.db, kettlebells: c.sizes.kb });
-      return Object.assign(r, { src: p, date: c.mode === "session" ? c.toDate : addDays(p.date, shift) });
+      const scaled = JSON.parse(JSON.stringify(r.body));
+      applyLineEdits(c, p, r.body);
+      const date = c.mode === "session" ? c.toDate : (c.dates[p.id] || addDays(p.date, shift));
+      return Object.assign(r, { src: p, scaled, date, skip: !!c.skip[p.id] });
     });
+  }
+  // One row per exercise (and WOD description): the original, then editable boxes holding what
+  // will be copied. Undo keeps the original line; Reset drops what was typed and goes back to the
+  // scaled version. Unchanged lines are hidden until "Show the other exercises".
+  const showVal = (ex, f) => (ex[f] == null ? "" : String(ex[f]));
+  const origText = (ex) => [`${ex.sets || 1} × ${ex.target || "–"}`, ex.suggestKg != null ? ex.suggestKg + " kg" : "", ex.extra || ""].filter(Boolean).join(" · ");
+  function copyLinesHTML(c, x) {
+    let html = "", shown = 0, hidden = 0;
+    const src = x.src.body || {};
+    (x.body.blocks || []).forEach((b, bi) => {
+      const sb0 = (src.blocks || [])[bi] || {}, sc = (x.scaled.blocks || [])[bi] || {};
+      (b.exercises || []).forEach((ex, ei) => {
+        const key = `${x.src.id}|${bi}|${ei}`, orig = (sb0.exercises || [])[ei] || {}, scl = (sc.exercises || [])[ei] || {};
+        const edited = LINE_FIELDS.some((f) => c.edits[key + "|" + f] !== undefined), undone = !!c.undo[key];
+        const changed = LINE_FIELDS.some((f) => showVal(orig, f) !== showVal(scl, f));
+        if (!changed && !edited && !undone && !c.all[x.src.id]) { hidden++; return; }
+        shown++;
+        const k = esc(key);
+        const inputs = undone ? `<span class="extra">Kept as the original</span>` : `
+            <input class="cw-sets" data-cw-edit="${k}|sets" type="number" min="1" max="20" inputmode="numeric" value="${esc(showVal(ex, "sets"))}" aria-label="Sets">
+            <span class="x">×</span><input class="cw-target" data-cw-edit="${k}|target" value="${esc(showVal(ex, "target"))}" aria-label="Target">
+            ${orig.suggestKg != null || scl.suggestKg != null ? `<input class="cw-kg" data-cw-edit="${k}|suggestKg" type="number" step="0.5" min="0" inputmode="decimal" value="${esc(showVal(ex, "suggestKg"))}" aria-label="Suggested kg"><span class="x">kg</span>` : ""}
+            ${orig.extra != null || scl.extra != null || c.edits[key + "|extra"] !== undefined ? `<input class="cw-extra" data-cw-edit="${k}|extra" value="${esc(showVal(ex, "extra"))}" aria-label="Extra" placeholder="Extra (RPE, loads)">` : ""}`;
+        html += `<li class="${undone ? "undone" : edited ? "edited" : changed ? "" : "same"}"><div class="cw-line-head"><span class="cw-name">${esc(b.key || "")} · ${esc(ex.name)}</span>
+            ${edited && !undone ? `<span class="chip info">edited</span>` : ""}
+            <span class="cw-btns">${edited && !undone ? `<button type="button" class="link" data-act="copyline-reset" data-key="${k}">Reset</button>` : ""}
+              ${undone ? `<button type="button" class="link" data-act="copyline-undo" data-key="${k}">Use the scaled line</button>` : changed || edited ? `<button type="button" class="link danger" data-act="copyline-undo" data-key="${k}">Undo</button>` : ""}</span></div>
+          <div class="cw-was"><s>${esc(origText(orig))}</s></div>
+          <div class="cw-edit">${inputs}</div></li>`;
+      });
+      if (b.note != null) {
+        const key = `${x.src.id}|${bi}|note`, k = esc(key);
+        const edited = c.edits[key + "|note"] !== undefined, undone = !!c.undo[key], changed = sb0.note !== sc.note;
+        if (!changed && !edited && !undone && !c.all[x.src.id]) { hidden++; return; }
+        shown++;
+        html += `<li class="${undone ? "undone" : edited ? "edited" : ""}"><div class="cw-line-head"><span class="cw-name">${esc(b.key || "")} · ${esc(b.name || "Block")} (description)</span>
+            ${edited && !undone ? `<span class="chip info">edited</span>` : ""}
+            <span class="cw-btns">${edited && !undone ? `<button type="button" class="link" data-act="copyline-reset" data-key="${k}">Reset</button>` : ""}
+              ${undone ? `<button type="button" class="link" data-act="copyline-undo" data-key="${k}">Use the scaled description</button>` : changed || edited ? `<button type="button" class="link danger" data-act="copyline-undo" data-key="${k}">Undo</button>` : ""}</span></div>
+          ${undone ? `<div class="cw-was pre">${esc(sb0.note)}</div><span class="extra">Kept as the original</span>` : `<textarea class="cw-note" data-cw-edit="${k}|note" rows="${Math.min(8, String(b.note).split("\n").length + 1)}" aria-label="Description">${esc(b.note)}</textarea>`}</li>`;
+      }
+    });
+    return { html, shown, hidden };
   }
   function copyWeekHTML() {
     const c = state.copyWeek;
     const fromOpts = athletes().filter((a) => ownPrograms(a.email).length).map((a) => `<option value="${esc(a.email)}" ${a.email === c.from ? "selected" : ""}>${esc(a.display_name || a.email)}</option>`).join("");
     const weekOpts = weeksOf(c.from).map((w) => `<option value="${w.week}" ${w.week === c.week ? "selected" : ""}>${esc(weekLabel(w.week))} · ${w.progs.length} session${w.progs.length > 1 ? "s" : ""}</option>`).join("");
-    const plan = copyWeekPlan(), toName = nameOf(c.to);
+    const plan = copyWeekPlan(), toName = nameOf(c.to), taking = plan.filter((x) => !x.skip).length;
     const clash = plan.filter((x) => state.programs.some((p) => p.athlete_email === c.to && p.date === x.date));
     let sessions = "";
     for (const x of plan) {
       const picks = x.choices.map((ch) => `<label class="cw-pick"><span><b>${esc(ch.label)}</b> ${esc(PSfmt(ch.from))} kg ${ch.kind === "kb" ? "kettlebell" : "dumbbell"} × ${c.pct}% = ${esc(PSfmt(ch.scaled))} kg</span>
           <select data-cw-pick="${esc(ch.key)}">${ch.options.map((o) => `<option value="${o}" ${o === ch.pick ? "selected" : ""}>${esc(PSfmt(o))} kg</option>`).join("")}</select></label>`).join("");
-      const lines = x.changes.map((ch) => `<li><span class="cw-name">${esc(ch.block || "")} · ${esc(ch.name)}</span><span class="cw-diff">${ch.parts.map((pt) => `<s>${esc(pt.from)}</s> → <b>${esc(pt.to)}</b>`).join("<br>")}</span></li>`).join("");
-      sessions += `<div class="cw-session"><h4>${esc(fmtDate(x.src.date))} → ${esc(fmtDate(x.date))} · ${x.src.body.short ? esc(x.src.body.short) + " · " : ""}${esc(x.src.title)}</h4>
+      const { html: lines, shown, hidden } = copyLinesHTML(c, x);
+      const pid = esc(x.src.id);
+      sessions += `<div class="cw-session${x.skip ? " skipped" : ""}"><div class="cw-head">
+          <label class="check cw-take"><input type="checkbox" data-cw-skip="${pid}" ${x.skip ? "" : "checked"}><h4>${esc(fmtDate(x.src.date))} → ${esc(fmtDate(x.date))} · ${x.src.body.short ? esc(x.src.body.short) + " · " : ""}${esc(x.src.title)}</h4></label>
+          ${c.mode === "week" && !x.skip ? `<label class="cw-date">Date<input type="date" data-cw-date="${pid}" value="${esc(x.date)}"></label>` : ""}</div>
+        ${x.skip ? `<div class="extra">Not copied. Tick it to bring it back.</div>` : `
         ${picks ? `<div class="cw-picks"><div class="extra">Pick the ${x.choices.some((ch) => ch.kind === "kb") ? "dumbbell or kettlebell" : "dumbbell"}${c.pct < 100 ? " to drop to" : c.pct > 100 ? " to go up to" : ""}:</div>${picks}</div>` : ""}
-        ${lines ? `<ul class="cw-changes">${lines}</ul>` : `<div class="extra">Nothing to scale in this one (times, holds and ticks stay as they are).</div>`}</div>`;
+        ${shown ? `<ul class="cw-lines">${lines}</ul>` : `<div class="extra">Nothing to scale in this one (times, holds and ticks stay as they are).</div>`}
+        ${hidden || c.all[x.src.id] ? `<button type="button" class="link" data-act="copyweek-all" data-id="${pid}">${c.all[x.src.id] ? "Show only the changes" : `Show the other ${hidden} exercise${hidden === 1 ? "" : "s"} to edit them too`}</button>` : ""}`}</div>`;
     }
     const single = c.mode === "session", src = single && plan[0] ? plan[0].src : null;
     const fromFields = single
@@ -373,11 +450,11 @@
       ${clash.length ? `<div class="banner warn">${esc(toName)} already has a program on ${[...new Set(clash.map((x) => x.date))].map((d) => esc(fmtDate(d))).join(", ")}. The copies are added alongside, nothing is replaced.</div>` : ""}
       <div class="cw-list">${sessions || `<div class="extra">No sessions that week.</div>`}</div>
       <label class="check"><input type="checkbox" id="cw-publish" ${c.publish ? "checked" : ""}> Publish straight away (otherwise they're saved as drafts to check first)</label>
-      <div class="row"><button class="btn" data-act="copyweek-cancel">Cancel</button><button class="btn primary" data-act="copyweek-save" ${plan.length ? "" : "disabled"}>Copy ${plan.length} session${plan.length === 1 ? "" : "s"} to ${esc(toName)}</button></div></section>`;
+      <div class="row"><button class="btn" data-act="copyweek-cancel">Cancel</button><button class="btn primary" data-act="copyweek-save" ${taking ? "" : "disabled"}>Copy ${taking} session${taking === 1 ? "" : "s"} to ${esc(toName)}</button></div></section>`;
   }
   const PSfmt = (n) => String(Math.round(n * 100) / 100);
   async function saveCopyWeek() {
-    const c = state.copyWeek, plan = copyWeekPlan(); if (!plan.length) return;
+    const c = state.copyWeek, plan = copyWeekPlan().filter((x) => !x.skip); if (!plan.length) return;
     const now = new Date().toISOString();
     const rows = plan.map((x) => ({
       id: newProgramId(x.date), athlete_email: c.to, date: x.date, title: x.src.title, published: c.publish,
@@ -1064,14 +1141,31 @@
     const el = ev.target;
     if (el.dataset.ask != null && state.boardAsk) { state.boardAsk.items[Number(el.dataset.ask)].choice = el.value; return; }
     if (el.id === "reorder-renumber" && state.reorder) { state.reorder.renumber = el.checked; return; }
+    if (state.copyWeek && el.dataset.cwEdit) {
+      // A typed line: keep it, then redraw once focus has moved on so Tab still goes to the next box.
+      const c = state.copyWeek, k = el.dataset.cwEdit;
+      c.edits[k] = el.tagName === "TEXTAREA" ? el.value : el.value.trim();
+      setTimeout(() => {
+        const ae = document.activeElement, again = ae && ae.dataset && ae.dataset.cwEdit;
+        render();
+        if (again) { const n = app.querySelector(`[data-cw-edit="${CSS.escape(again)}"]`); if (n) n.focus(); }
+      }, 0);
+      return;
+    }
+    if (state.copyWeek && (el.dataset.cwSkip || el.dataset.cwDate)) {
+      const c = state.copyWeek;
+      if (el.dataset.cwSkip) c.skip[el.dataset.cwSkip] = !el.checked;
+      else if (el.value) c.dates[el.dataset.cwDate] = el.value;
+      render(); return;
+    }
     if (state.copyWeek && (el.id || "").startsWith("cw-") || (state.copyWeek && el.dataset.cwPick)) {
       const c = state.copyWeek;
       if (el.dataset.cwPick) c.picks[el.dataset.cwPick] = Number(el.value);
-      else if (el.id === "cw-from") { c.from = el.value; const w = weeksOf(c.from); c.week = c.toWeek = (w.find((x) => x.week >= mondayOf(today())) || w[w.length - 1]).week; c.picks = {};
+      else if (el.id === "cw-from") { c.from = el.value; const w = weeksOf(c.from); c.week = c.toWeek = (w.find((x) => x.week >= mondayOf(today())) || w[w.length - 1]).week; c.picks = {}; Object.assign(c, freshLines());
         if (c.to === c.from) c.to = (athletes().find((a) => a.email !== c.from && a.active) || { email: c.to }).email; }
-      else if (el.id === "cw-week") { c.week = el.value; c.toWeek = el.value; c.picks = {}; }
+      else if (el.id === "cw-week") { c.week = el.value; c.toWeek = el.value; c.picks = {}; Object.assign(c, freshLines()); }
       else if (el.id === "cw-to") c.to = el.value;
-      else if (el.id === "cw-toweek") { if (el.value) c.toWeek = mondayOf(el.value); }
+      else if (el.id === "cw-toweek") { if (el.value) { c.toWeek = mondayOf(el.value); c.dates = {}; } }
       else if (el.id === "cw-todate") { if (el.value) c.toDate = el.value; }
       else if (el.id === "cw-pct") { const n = Math.round(Number(el.value)); if (n >= 10 && n <= 300) { c.pct = n; c.picks = {}; } }
       else if (el.id === "cw-db" || el.id === "cw-kb") { c.sizes[el.id === "cw-db" ? "db" : "kb"] = PS.parseSizes(el.value, el.id === "cw-db" ? PS.DUMBBELLS : PS.KETTLEBELLS); c.picks = {}; }
@@ -1132,6 +1226,13 @@
       startCopyWeek(act === "copy-session" ? "session" : "week", id || null);
       if (location.hash !== "#programs") location.hash = "programs"; else render();
     }
+    else if (act === "copyline-undo" && state.copyWeek) {
+      const c = state.copyWeek, k = btn.dataset.key;
+      if (c.undo[k]) delete c.undo[k]; else { c.undo[k] = true; for (const f of LINE_FIELDS.concat("note")) delete c.edits[k + "|" + f]; }
+      render();
+    }
+    else if (act === "copyline-reset" && state.copyWeek) { const c = state.copyWeek, k = btn.dataset.key; for (const f of LINE_FIELDS.concat("note")) delete c.edits[k + "|" + f]; render(); }
+    else if (act === "copyweek-all" && state.copyWeek) { const c = state.copyWeek; c.all[id] = !c.all[id]; render(); }
     else if (act === "copyweek-whole" && state.copyWeek) { startCopyWeek("week", state.copyWeek.pid); render(); }
     else if (act === "copyweek-pct" && state.copyWeek) { state.copyWeek.pct = Number(btn.dataset.n); state.copyWeek.picks = {}; render(); }
     else if (act === "copyweek-cancel") { const back = state.copyWeek && state.copyWeek.returnTo; state.copyWeek = null; if (back) location.hash = back; else render(); }

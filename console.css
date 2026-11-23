@@ -256,3 +256,31 @@ label.file input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .wk-title{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wk-draft{font-size:10.5px;color:var(--muted)}
 .wk-everyone th,.wk-everyone td{background:var(--bg)}
+
+/* copy: line-by-line edits */
+.cw-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.cw-take{display:flex;align-items:center;gap:8px;min-height:auto}
+.cw-take h4{margin:0}
+.cw-date{display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:600;color:var(--muted)}
+.cw-date input,.cw-edit input,.cw-note{border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);font:500 14px var(--body);padding:5px 7px;min-width:0}
+.cw-session.skipped{opacity:.6}
+.cw-session.skipped h4{text-decoration:line-through}
+.cw-lines{list-style:none;margin:0;padding:0;display:grid;gap:4px}
+.cw-lines li{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;padding:7px 9px;display:grid;gap:4px}
+.cw-lines li.edited{border-left-color:var(--info)}
+.cw-lines li.undone{border-left-color:var(--muted)}
+.cw-lines li.same{border-left-color:var(--line)}
+.cw-line-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.cw-line-head .cw-name{font-weight:600;font-size:14px;flex:1;min-width:0}
+.cw-btns{display:flex;gap:12px}
+.cw-session .link{border:0;background:none;padding:0;color:var(--info);font:600 12.5px var(--body);cursor:pointer;justify-self:start}
+.cw-session .link.danger{color:var(--accent)}
+.cw-was{font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+.cw-was.pre{white-space:pre-line}
+.cw-edit{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.cw-edit .x{color:var(--muted);font-size:13px}
+.cw-sets{width:58px}
+.cw-target{flex:1 1 180px}
+.cw-kg{width:78px}
+.cw-extra{flex:1 1 220px}
+.cw-note{width:100%;resize:vertical;font-weight:400}
