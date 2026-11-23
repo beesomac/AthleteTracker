@@ -284,3 +284,54 @@ label.file input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .cw-kg{width:78px}
 .cw-extra{flex:1 1 220px}
 .cw-note{width:100%;resize:vertical;font-weight:400}
+
+/* Calendar: month grid, plan bands, templates panel */
+.cal-layout{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:14px;align-items:start}
+@media (max-width:960px){.cal-layout{grid-template-columns:1fr}}
+.cal-card{padding:0;overflow-x:auto}
+.cal-grid{display:grid;grid-template-columns:repeat(7,minmax(96px,1fr));min-width:690px}
+.cal-h{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;padding:8px;border-bottom:1px solid var(--line)}
+.cal-cell{min-height:104px;padding:5px;border-bottom:1px solid var(--line);border-left:1px solid var(--line);display:flex;flex-direction:column;gap:3px;min-width:0;transition:background .1s}
+.cal-cell:nth-child(7n+8){border-left:0}
+.cal-cell.out{background:var(--bg)}
+.cal-cell.out .cal-day{opacity:.55}
+.cal-cell.over{background:var(--info-soft)}
+.cal-day{font:600 13px var(--display);letter-spacing:.02em;color:var(--muted)}
+.cal-cell.today .cal-day{color:#fff;background:var(--accent);border-radius:999px;padding:0 7px;align-self:flex-start}
+.cal-chip{display:flex;gap:5px;align-items:baseline;padding:3px 6px;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:6px;background:var(--surface);color:var(--ink);text-decoration:none;font-size:12px;line-height:1.25;min-width:0}
+.cal-chip[draggable=true]{cursor:grab}
+.cal-chip:hover{border-color:var(--muted)}
+.cal-chip.draft{border-left-color:var(--muted);border-style:dashed solid dashed solid}
+.cal-chip.shared{border-left-color:var(--info)}
+.cal-chip.seq{border-left-color:var(--done)}
+.cal-chip.dragging,.tpl-card.dragging{opacity:.4}
+.cal-who{font-weight:600;flex:0 0 auto;max-width:48%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cal-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.cal-n{font-weight:700;color:var(--done);margin-right:4px}
+.cal-more{font-size:11.5px;color:var(--info);font-weight:600;text-decoration:none}
+.cal-band{font-size:10.5px;font-weight:600;line-height:1.5;padding:0 6px;margin:0 -5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cal-band.c0{background:var(--accent-soft);color:var(--accent)}
+.cal-band.c1{background:var(--info-soft);color:var(--info)}
+.cal-band.c2{background:var(--done-soft);color:var(--done)}
+.cal-band.c3{background:var(--warn-soft);color:var(--warn)}
+.plan-dot.c0{background:var(--accent)}.plan-dot.c1{background:var(--info)}.plan-dot.c2{background:var(--done)}.plan-dot.c3{background:var(--warn)}
+.cal-side{margin-top:14px;position:sticky;top:120px}
+@media (max-width:960px){.cal-side{position:static}}
+.tpl-card{display:flex;flex-wrap:wrap;align-items:center;gap:9px;border:1px solid var(--line);border-radius:9px;padding:8px;background:var(--surface);cursor:grab;user-select:none}
+.tpl-card:hover{border-color:var(--muted)}
+.tpl-info{display:grid;flex:1 1 140px;min-width:0}
+.tpl-info .extra{font-size:12px}
+.tpl-btns{display:flex;gap:4px;flex:0 0 auto;margin-left:auto}
+.tpl-btns .btn{padding:4px 8px;font-size:12px}
+.plan-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.plan-list li{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:8px}
+.plan-list li:last-child{border-bottom:0;padding-bottom:0}
+.plan-list li.editing{display:block}
+.plan-dot{width:12px;height:12px;border-radius:4px;flex:0 0 auto}
+.plan-info{display:grid;flex:1 1 220px;min-width:0}
+.plan-info .extra{font-size:12.5px}
+.tpl-grid .tpl-cell{min-height:64px;height:64px;transition:background .1s}
+.tpl-grid .tpl-cell.over{background:var(--info-soft)}
+.tpl-grid tr.tpl-past th,.tpl-grid tr.tpl-past td{background:var(--bg)}
+.tpl-add{display:inline-grid;place-items:center;width:24px;height:24px;border:1px dashed var(--line);border-radius:6px;color:var(--muted);text-decoration:none;font-weight:600}
+.tpl-add:hover{border-color:var(--accent);color:var(--accent)}
