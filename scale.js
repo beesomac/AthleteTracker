@@ -42,6 +42,9 @@
 
   function roundBar(kg) { return Math.max(5, Math.round(kg / 5) * 5); }
 
+  // Reps and weight can scale differently: ctx.repScale / ctx.weightScale, else ctx.scale for both.
+  const wScale = (ctx) => (ctx.weightScale != null ? ctx.weightScale : ctx.scale);
+  const rScale = (ctx) => (ctx.repScale != null ? ctx.repScale : ctx.scale);
   // Scales one string. ctx: { scale, equipment, sizes: { db, kb }, picks, key, out }
   // picks[key + "|" + original] holds a chosen dumbbell/kettlebell size; every weight that needs
   // a choice is pushed to ctx.out as { key, from, scaled, options, pick, kind }.
@@ -50,10 +53,11 @@
   const SKIP_BEFORE = /(?:rpe|rir|week|wk|session|phase|tempo|day|block|amrap|emom|e\d+mom|every|cap|zone|level|open|of|top|round|set|no\.?|#|[:.\d])\s*$/i;
 
   function scaleWeight(kg, kind, ctx, original) {
-    if (ctx.scale === 1) return kg;
-    const scaled = kg * ctx.scale;
+    const ws = wScale(ctx);
+    if (ws === 1) return kg;
+    const scaled = kg * ws;
     if (kind === "bar") return roundBar(scaled);
-    const c = choices(scaled, ctx.sizes[kind], ctx.scale);
+    const c = choices(scaled, ctx.sizes[kind], ws);
     // A WOD note's weight that a movement in the block already asked about uses that answer.
     const alias = ctx.aliases && ctx.out && ctx.out.find((x) => ctx.aliases.includes(x.key) && x.from === original && x.kind === kind);
     if (alias) return alias.pick;
@@ -64,7 +68,7 @@
   }
 
   function scaleText(text, ctx) {
-    if (text == null || text === "" || ctx.scale === 1) return text;
+    if (text == null || text === "" || (wScale(ctx) === 1 && rScale(ctx) === 1)) return text;
     const lines = String(text).split("\n");
     return lines.map((line) => {
       const kind = ctx.equipment === "auto" ? equipmentOf(line) : (ctx.equipment || equipmentOf(line));
@@ -81,12 +85,12 @@
       });
       // 2. whole numbers (and runs like 21-15-9 or 24/20) that are reps. In a WOD note only the
       // movement lines ("30 double-unders"), not headers like "Rounds to 8, 12, 16, 20 min:".
-      if (!ctx.movementLinesOnly || /^\s*\d/.test(line)) s = s.replace(/(\d+(?:\s*[-–\/]\s*\d+)*)/g, (run, _r, at, str) => {
+      if (rScale(ctx) !== 1 && (!ctx.movementLinesOnly || /^\s*\d/.test(line))) s = s.replace(/(\d+(?:\s*[-–\/]\s*\d+)*)/g, (run, _r, at, str) => {
         const before = str.slice(0, at), after = str.slice(at + run.length);
         if (/\u0000$/.test(before) || /^\u0000/.test(after)) return run;          // placeholder index
         if ((/[A-Za-z]$/.test(before) && !/\d\s*x$/i.test(before)) || /^[A-Za-z]\d/.test(after)) return run; // part of a word, e.g. E2MOM
         if (SKIP_BEFORE.test(before) || SKIP_AFTER.test(after)) return run;          // "2 × 22.5", "3x10": the count before × stays
-        return run.replace(/\d+/g, (d) => String(Math.max(1, Math.round(Number(d) * ctx.scale))));
+        return run.replace(/\d+/g, (d) => String(Math.max(1, Math.round(Number(d) * rScale(ctx)))));
       });
       return s.replace(/\u0000(\d+)\u0000/g, (_, i) => held[Number(i)]);
     }).join("\n");
@@ -102,7 +106,9 @@
 
   // Returns { body, choices, changes } for one program body. picks are the trainer's dumbbell
   // choices so far, keyed "<prefix>|<exercise id>|<original kg>".
+  // scale: one number for reps and weight, or { reps, weight }.
   function scaleBody(body, scale, opts = {}) {
+    const sc = typeof scale === "object" && scale ? { repScale: scale.reps, weightScale: scale.weight, scale: scale.weight } : { scale };
     const sizes = { db: opts.dumbbells || DUMBBELLS, kb: opts.kettlebells || KETTLEBELLS };
     const picks = opts.picks || {}, prefix = opts.prefix || "", out = [], changes = [];
     const b2 = JSON.parse(JSON.stringify(body || {}));
@@ -110,7 +116,7 @@
       const asked = out.length;
       for (const ex of b.exercises || []) {
         const equipment = equipmentOf(ex.name + " " + (ex.target || ""));
-        const ctx = { scale, equipment, sizes, picks, out, key: prefix + "|" + (b.key || "") + ex.id, label: ex.name };
+        const ctx = { ...sc, equipment, sizes, picks, out, key: prefix + "|" + (b.key || "") + ex.id, label: ex.name };
         const before = { target: ex.target, extra: ex.extra, suggestKg: ex.suggestKg };
         if (ex.log !== "secs") ex.target = scaleText(ex.target, ctx);
         if (ex.extra) { const e = scaleExtra(ex.extra, ctx); if (e) ex.extra = e; else delete ex.extra; }
@@ -122,7 +128,7 @@
         if (parts.length) changes.push({ block: b.key, name: ex.name, parts });
       }
       if (b.note) {
-        const ctx = { scale, equipment: "auto", movementLinesOnly: true, sizes, picks, out, key: prefix + "|" + (b.key || "") + "note", aliases: out.slice(asked).map((x) => x.key), label: (b.name || "WOD") + " note" };
+        const ctx = { ...sc, equipment: "auto", movementLinesOnly: true, sizes, picks, out, key: prefix + "|" + (b.key || "") + "note", aliases: out.slice(asked).map((x) => x.key), label: (b.name || "WOD") + " note" };
         const n = scaleText(b.note, ctx);
         if (n !== b.note) { changes.push({ block: b.key, name: (b.name || "Block") + " (description)", parts: [{ what: "note", from: b.note, to: n }] }); b.note = n; }
       }
