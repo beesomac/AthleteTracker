@@ -324,14 +324,36 @@
       w = (weeks.find((x) => x.week === thisWeek) || weeks.find((x) => x.week > thisWeek) || weeks[weeks.length - 1]).week;
     }
     const to = (athletes().find((a) => a.email !== from && a.active) || { email: from }).email;
-    state.copyWeek = { mode: p && mode === "session" ? "session" : "week", pid: p ? p.id : null, from, week: w, to, toWeek: w, toDate: p ? p.date : w, pct: 80, repPct: null, keepReps: keptReps(), publish: false, picks: {}, sizes: loadSizes(), ...freshLines() };
+    state.copyWeek = { mode: p && mode === "session" ? "session" : "week", pid: p ? p.id : null, from, week: w, to, toWeek: w, toDate: p ? p.date : w, pct: 80, noWeight: false, noReps: keptReps(), publish: false, picks: {}, sizes: loadSizes(), ...freshLines() };
   }
   // Line-by-line overrides on top of the scaling, keyed "<program id>|<block index>|<exercise index or note>":
-  //   edits[key + "|" + field] = what the trainer typed (sets, target, suggestKg, extra, note)
+  //   edits[key + "|" + field] = what the trainer typed: reps, weight (see lineParts) or note
   //   undo[key] = keep this line exactly as the original;  skip[program id] = don't copy that session
   //   dates[program id] = a different date for that session;  all[program id] = show unchanged lines too
   function freshLines() { return { edits: {}, undo: {}, skip: {}, dates: {}, all: {} }; }
-  const LINE_FIELDS = ["sets", "target", "suggestKg", "extra"];
+  const LINE_FIELDS = ["sets", "target", "suggestKg", "extra"];   // what Undo puts back
+  const EDIT_FIELDS = ["reps", "weight"];
+  // A line as a Reps box and a Weight box:
+  //   suggestKg set          → reps = target, weight = suggestKg
+  //   "4 reps @ 2 × 20 kg"   → reps = "4 reps", weight = "2 × 20 kg" (split at the @)
+  //   "15 reps from 61/38 kg"→ reps = whole target, weight = "61/38" (changed in place)
+  const KG_GROUP = /(\d+(?:[.,]\d+)?(?:\s*\/\s*\d+(?:[.,]\d+)?)*)(\s*kg\b)/i;
+  function lineParts(ex) {
+    const t = String(ex.target || "");
+    if (ex.suggestKg != null) return { kind: "kg", reps: t, weight: String(ex.suggestKg) };
+    const at = t.match(/^(.*?)\s*@\s*(.*\bkg\b.*)$/i);
+    if (at) return { kind: "at", reps: at[1], weight: at[2] };
+    const g = t.match(KG_GROUP);
+    if (g) return { kind: "grp", reps: t, weight: g[1] };
+    return { kind: null, reps: t, weight: null };
+  }
+  function setReps(ex, v) { const lp = lineParts(ex); ex.target = lp.kind === "at" ? `${v} @ ${lp.weight}` : v; }
+  function setWeight(ex, v) {
+    const lp = lineParts(ex);
+    if (lp.kind === "kg") { const n = Number(String(v).replace(",", ".")); if (v === "") delete ex.suggestKg; else if (isFinite(n)) ex.suggestKg = n; }
+    else if (lp.kind === "at") ex.target = `${lp.reps} @ ${v}`;
+    else if (lp.kind === "grp") ex.target = String(ex.target).replace(KG_GROUP, (_, n, unit) => v + unit);
+  }
   function applyLineEdits(c, p, body) {
     const src = p.body || {};
     (body.blocks || []).forEach((b, bi) => {
@@ -339,11 +361,8 @@
       (b.exercises || []).forEach((ex, ei) => {
         const key = `${p.id}|${bi}|${ei}`, orig = (sb0.exercises || [])[ei] || {};
         if (c.undo[key]) { for (const f of LINE_FIELDS) { if (orig[f] === undefined) delete ex[f]; else ex[f] = orig[f]; } return; }
-        for (const f of LINE_FIELDS) {
-          const v = c.edits[key + "|" + f]; if (v === undefined) continue;
-          if (v === "") delete ex[f];
-          else ex[f] = f === "sets" ? Math.max(1, Math.round(Number(v)) || 1) : f === "suggestKg" ? (isFinite(Number(v)) ? Number(v) : ex[f]) : v;
-        }
+        if (c.edits[key + "|reps"] !== undefined) setReps(ex, c.edits[key + "|reps"]);
+        if (c.edits[key + "|weight"] !== undefined) setWeight(ex, c.edits[key + "|weight"]);
       });
       if (b.note != null) {
         const key = `${p.id}|${bi}|note`;
@@ -353,11 +372,12 @@
     return body;
   }
   // The scaled copies, worked out fresh from the current choices.
-  // Weight % is c.pct; reps follow it unless "Keep reps the same" is ticked or Reps % was set on its own.
-  const repPct = (c) => (c.keepReps ? 100 : c.repPct != null ? c.repPct : c.pct);
-  const scaleLabel = (c) => (repPct(c) === c.pct ? `${c.pct}%` : `weight ${c.pct}%, reps ${repPct(c)}%`);
+  // One % for both; "Undo all weight scaling" / "Undo all reps scaling" put that side back to 100%.
+  const repPct = (c) => (c.noReps ? 100 : c.pct);
+  const weightPct = (c) => (c.noWeight ? 100 : c.pct);
+  const scaleLabel = (c) => (repPct(c) === weightPct(c) ? `${weightPct(c)}%` : `weight ${weightPct(c)}%, reps ${repPct(c)}%`);
   function copyWeekPlan() {
-    const c = state.copyWeek, scale = { weight: c.pct / 100, reps: repPct(c) / 100 };
+    const c = state.copyWeek, scale = { weight: weightPct(c) / 100, reps: repPct(c) / 100 };
     const one = c.mode === "session" ? state.programs.find((x) => x.id === c.pid) : null;
     const progs = c.mode === "session" ? (one ? [one] : []) : ((weeksOf(c.from).find((x) => x.week === c.week) || {}).progs || []);
     const shift = daysBetween(c.week, c.toWeek);
@@ -373,7 +393,7 @@
   // will be copied. Undo keeps the original line; Reset drops what was typed and goes back to the
   // scaled version. Unchanged lines are hidden until "Show the other exercises".
   const showVal = (ex, f) => (ex[f] == null ? "" : String(ex[f]));
-  const origText = (ex) => [`${ex.sets || 1} × ${ex.target || "–"}`, ex.suggestKg != null ? ex.suggestKg + " kg" : "", ex.extra || ""].filter(Boolean).join(" · ");
+  const origText = (ex) => [`${ex.sets || 1} × ${ex.target || "–"}`, ex.suggestKg != null ? ex.suggestKg + " kg" : ""].filter(Boolean).join(" · ");
   function copyLinesHTML(c, x) {
     let html = "", shown = 0, hidden = 0;
     const src = x.src.body || {};
@@ -381,16 +401,15 @@
       const sb0 = (src.blocks || [])[bi] || {}, sc = (x.scaled.blocks || [])[bi] || {};
       (b.exercises || []).forEach((ex, ei) => {
         const key = `${x.src.id}|${bi}|${ei}`, orig = (sb0.exercises || [])[ei] || {}, scl = (sc.exercises || [])[ei] || {};
-        const edited = LINE_FIELDS.some((f) => c.edits[key + "|" + f] !== undefined), undone = !!c.undo[key];
+        const edited = EDIT_FIELDS.some((f) => c.edits[key + "|" + f] !== undefined), undone = !!c.undo[key];
         const changed = LINE_FIELDS.some((f) => showVal(orig, f) !== showVal(scl, f));
         if (!changed && !edited && !undone && !c.all[x.src.id]) { hidden++; return; }
         shown++;
         const k = esc(key);
+        const lp = lineParts(ex);
         const inputs = undone ? `<span class="extra">Kept as the original</span>` : `
-            <input class="cw-sets" data-cw-edit="${k}|sets" type="number" min="1" max="20" inputmode="numeric" value="${esc(showVal(ex, "sets"))}" aria-label="Sets">
-            <span class="x">×</span><input class="cw-target" data-cw-edit="${k}|target" value="${esc(showVal(ex, "target"))}" aria-label="Target">
-            ${orig.suggestKg != null || scl.suggestKg != null ? `<input class="cw-kg" data-cw-edit="${k}|suggestKg" type="number" step="0.5" min="0" inputmode="decimal" value="${esc(showVal(ex, "suggestKg"))}" aria-label="Suggested kg"><span class="x">kg</span>` : ""}
-            ${orig.extra != null || scl.extra != null || c.edits[key + "|extra"] !== undefined ? `<input class="cw-extra" data-cw-edit="${k}|extra" value="${esc(showVal(ex, "extra"))}" aria-label="Extra" placeholder="Extra (RPE, loads)">` : ""}`;
+            <label class="cw-f cw-reps"><span>Reps</span><input data-cw-edit="${k}|reps" value="${esc(lp.reps)}" aria-label="Reps for ${esc(ex.name)}"></label>
+            ${lp.kind ? `<label class="cw-f cw-weight"><span>Weight</span><input data-cw-edit="${k}|weight" value="${esc(lp.weight)}" ${lp.kind === "kg" ? `inputmode="decimal"` : ""} aria-label="Weight for ${esc(ex.name)}">${lp.kind === "kg" ? `<span>kg</span>` : ""}</label>` : ""}`;
         html += `<li class="${undone ? "undone" : edited ? "edited" : changed ? "" : "same"}"><div class="cw-line-head"><span class="cw-name">${esc(b.key || "")} · ${esc(ex.name)}</span>
             ${edited && !undone ? `<span class="chip info">edited</span>` : ""}
             <span class="cw-btns">${edited && !undone ? `<button type="button" class="link" data-act="copyline-reset" data-key="${k}">Reset</button>` : ""}
@@ -445,11 +464,13 @@
         ${fromFields}
         <label>To<select id="cw-to">${athleteOptions(c.to)}</select></label>
         ${whenField}
-        <label>Weight %<input id="cw-pct" type="number" min="10" max="300" step="5" inputmode="numeric" value="${c.pct}"></label>
-        <label>Reps %<input id="cw-reppct" type="number" min="10" max="300" step="5" inputmode="numeric" value="${repPct(c)}" ${c.keepReps ? "disabled" : ""}></label>
+        <label>Scale %<input id="cw-pct" type="number" min="10" max="300" step="5" inputmode="numeric" value="${c.pct}"></label>
       </div>
       <div class="lib-cats">${[60, 70, 80, 90, 100, 110, 120].map((n) => `<button type="button" class="chip-btn${n === c.pct ? " on" : ""}" data-act="copyweek-pct" data-n="${n}">${n}%</button>`).join("")}</div>
-      <label class="check"><input type="checkbox" id="cw-keepreps" ${c.keepReps ? "checked" : ""}> Keep the reps the same, only scale the weight</label>
+      <div class="row cw-bulk">
+        <button type="button" class="btn${c.noWeight ? " on" : ""}" data-act="copyweek-noweight">${c.noWeight ? "Scale the weights again" : "Undo all weight scaling"}</button>
+        <button type="button" class="btn${c.noReps ? " on" : ""}" data-act="copyweek-noreps">${c.noReps ? "Scale the reps again" : "Undo all reps scaling"}</button>
+        <span class="extra">${esc(scaleLabel(c) === "100%" ? "Nothing is scaled." : "Copying at " + scaleLabel(c) + ".")}</span></div>
       <details class="cw-sizes"><summary>Dumbbell and kettlebell sizes in your gym</summary>
         <div class="fields"><label class="wide">Dumbbells (kg)<input id="cw-db" value="${esc(c.sizes.db.join(", "))}"></label>
         <label class="wide">Kettlebells (kg)<input id="cw-kb" value="${esc(c.sizes.kb.join(", "))}"></label></div></details>
@@ -464,7 +485,7 @@
     const now = new Date().toISOString();
     const rows = plan.map((x) => ({
       id: newProgramId(x.date), athlete_email: c.to, date: x.date, title: x.src.title, published: c.publish,
-      body: Object.assign(x.body, { copiedFrom: { program: x.src.id, scale: c.pct, repScale: repPct(c) } }), created_by_email: state.me, updated_at: now,
+      body: Object.assign(x.body, { copiedFrom: { program: x.src.id, scale: weightPct(c), repScale: repPct(c) } }), created_by_email: state.me, updated_at: now,
     }));
     const { error } = await sb.from("programs").insert(rows);
     if (error) return failed(error);
@@ -1174,8 +1195,6 @@
       else if (el.id === "cw-toweek") { if (el.value) { c.toWeek = mondayOf(el.value); c.dates = {}; } }
       else if (el.id === "cw-todate") { if (el.value) c.toDate = el.value; }
       else if (el.id === "cw-pct") { const n = Math.round(Number(el.value)); if (n >= 10 && n <= 300) { c.pct = n; c.picks = {}; } }
-      else if (el.id === "cw-reppct") { const n = Math.round(Number(el.value)); if (n >= 10 && n <= 300) c.repPct = n; }
-      else if (el.id === "cw-keepreps") { c.keepReps = el.checked; try { localStorage.setItem("console.keepReps", el.checked ? "1" : "0"); } catch (e) { /* private window */ } }
       else if (el.id === "cw-db" || el.id === "cw-kb") { c.sizes[el.id === "cw-db" ? "db" : "kb"] = PS.parseSizes(el.value, el.id === "cw-db" ? PS.DUMBBELLS : PS.KETTLEBELLS); c.picks = {}; }
       else if (el.id === "cw-publish") { c.publish = el.checked; return; }
       const open = !!($(".cw-sizes") && $(".cw-sizes").open);
@@ -1236,13 +1255,23 @@
     }
     else if (act === "copyline-undo" && state.copyWeek) {
       const c = state.copyWeek, k = btn.dataset.key;
-      if (c.undo[k]) delete c.undo[k]; else { c.undo[k] = true; for (const f of LINE_FIELDS.concat("note")) delete c.edits[k + "|" + f]; }
+      if (c.undo[k]) delete c.undo[k]; else { c.undo[k] = true; for (const f of EDIT_FIELDS.concat("note")) delete c.edits[k + "|" + f]; }
       render();
     }
-    else if (act === "copyline-reset" && state.copyWeek) { const c = state.copyWeek, k = btn.dataset.key; for (const f of LINE_FIELDS.concat("note")) delete c.edits[k + "|" + f]; render(); }
+    else if (act === "copyline-reset" && state.copyWeek) { const c = state.copyWeek, k = btn.dataset.key; for (const f of EDIT_FIELDS.concat("note")) delete c.edits[k + "|" + f]; render(); }
     else if (act === "copyweek-all" && state.copyWeek) { const c = state.copyWeek; c.all[id] = !c.all[id]; render(); }
     else if (act === "copyweek-whole" && state.copyWeek) { startCopyWeek("week", state.copyWeek.pid); render(); }
-    else if (act === "copyweek-pct" && state.copyWeek) { Object.assign(state.copyWeek, { pct: Number(btn.dataset.n), repPct: null, picks: {} }); render(); }
+    else if (act === "copyweek-pct" && state.copyWeek) { Object.assign(state.copyWeek, { pct: Number(btn.dataset.n), picks: {} }); render(); }
+    else if (act === "copyweek-noweight" || act === "copyweek-noreps") {
+      // Undo one side for every line: that side goes back to the original, and what was typed for it is dropped.
+      const c = state.copyWeek; if (!c) return;
+      const side = act === "copyweek-noweight" ? "weight" : "reps", flag = side === "weight" ? "noWeight" : "noReps";
+      c[flag] = !c[flag];
+      if (c[flag]) for (const k of Object.keys(c.edits)) if (k.endsWith("|" + side)) delete c.edits[k];
+      if (side === "weight") c.picks = {};
+      else try { localStorage.setItem("console.keepReps", c.noReps ? "1" : "0"); } catch (e) { /* private window */ }
+      render();
+    }
     else if (act === "copyweek-cancel") { const back = state.copyWeek && state.copyWeek.returnTo; state.copyWeek = null; if (back) location.hash = back; else render(); }
     else if (act === "week-group") { state.weekGroup = btn.dataset.g || ""; render(); }
     else if (act === "copy-week-row") {

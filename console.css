@@ -284,3 +284,12 @@ label.file input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .cw-kg{width:78px}
 .cw-extra{flex:1 1 220px}
 .cw-note{width:100%;resize:vertical;font-weight:400}
+
+/* copy: reps + weight boxes, bulk undo */
+.cw-f{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);font-weight:600;min-width:0}
+.cw-reps{flex:1 1 200px}
+.cw-reps input{flex:1;min-width:0}
+.cw-weight{flex:0 1 230px}
+.cw-weight input{width:100%;min-width:70px}
+.cw-bulk{justify-content:flex-start;align-items:center;flex-wrap:wrap}
+.cw-bulk .btn.on{background:var(--ink);color:var(--surface);border-color:var(--ink)}
