@@ -56,3 +56,12 @@ assert.strictEqual(note, "Repeat of 16.2, starting with 8 minutes. Rounds to 8, 
 const thr = S.scaleBody({ blocks: [{ key: "A", name: "Open 20.2", note: "AMRAP in 20 minutes:\n4 DB thrusters (two 22.5/15 kg DBs)\n6 toes-to-bars", exercises: [{ id: "g1", name: "DB Thruster", log: "tick", sets: 1, target: "4 reps @ 2 × 22.5/15 kg DB" }] }] }, 0.8);
 assert.strictEqual(thr.choices.length, 2); assert.strictEqual(thr.body.blocks[0].note, "AMRAP in 20 minutes:\n3 DB thrusters (two 17.5/12.5 kg DBs)\n5 toes-to-bars");
 console.log("WOD notes ok");
+// keep reps, scale weight only (and the other way round)
+const kr = S.scaleBody({ blocks: [{ key: "A", name: "Open 20.2", note: "AMRAP in 20 minutes:\n4 DB thrusters (two 22.5/15 kg DBs)\n6 toes-to-bars", exercises: [{ id: "g1", name: "DB Thruster", sets: 1, target: "4 reps @ 2 × 22.5/15 kg DB" }, { id: "g2", name: "Toes-to-Bar", sets: 1, target: "6 reps" }, { id: "g3", name: "BB Squat", sets: 3, target: "8 reps", suggestKg: 100 }] }] }, { reps: 1, weight: 0.8 });
+assert.strictEqual(kr.body.blocks[0].exercises[0].target, "4 reps @ 2 × 17.5/12.5 kg DB");
+assert.strictEqual(kr.body.blocks[0].exercises[1].target, "6 reps");
+assert.strictEqual(kr.body.blocks[0].exercises[2].target, "8 reps"); assert.strictEqual(kr.body.blocks[0].exercises[2].suggestKg, 80);
+assert.strictEqual(kr.body.blocks[0].note, "AMRAP in 20 minutes:\n4 DB thrusters (two 17.5/12.5 kg DBs)\n6 toes-to-bars");
+const kw = S.scaleBody({ blocks: [{ key: "A", exercises: [{ id: "a", name: "BB Squat", sets: 3, target: "10 reps @ 100 kg", suggestKg: 100 }] }] }, { reps: 0.8, weight: 1 });
+assert.strictEqual(kw.body.blocks[0].exercises[0].target, "8 reps @ 100 kg"); assert.strictEqual(kw.body.blocks[0].exercises[0].suggestKg, 100); assert.strictEqual(kw.choices.length, 0);
+console.log("separate reps / weight ok");

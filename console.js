@@ -300,6 +300,7 @@
     let saved = {}; try { saved = JSON.parse(localStorage.getItem(SIZES_KEY) || "{}") || {}; } catch (e) { saved = {}; }
     return { db: PS.parseSizes(saved.db, PS.DUMBBELLS), kb: PS.parseSizes(saved.kb, PS.KETTLEBELLS) };
   }
+  function keptReps() { try { return localStorage.getItem("console.keepReps") === "1"; } catch (e) { return false; } }
   function saveSizes(sz) { try { localStorage.setItem(SIZES_KEY, JSON.stringify({ db: sz.db.join(", "), kb: sz.kb.join(", ") })); } catch (e) { /* private window */ } }
   function addDays(iso, n) { const d = new Date(String(iso).slice(0, 10) + "T12:00:00"); d.setDate(d.getDate() + n); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
   function mondayOf(iso) { const d = new Date(String(iso).slice(0, 10) + "T12:00:00"); return addDays(iso, -((d.getDay() + 6) % 7)); }
@@ -323,7 +324,7 @@
       w = (weeks.find((x) => x.week === thisWeek) || weeks.find((x) => x.week > thisWeek) || weeks[weeks.length - 1]).week;
     }
     const to = (athletes().find((a) => a.email !== from && a.active) || { email: from }).email;
-    state.copyWeek = { mode: p && mode === "session" ? "session" : "week", pid: p ? p.id : null, from, week: w, to, toWeek: w, toDate: p ? p.date : w, pct: 80, publish: false, picks: {}, sizes: loadSizes(), ...freshLines() };
+    state.copyWeek = { mode: p && mode === "session" ? "session" : "week", pid: p ? p.id : null, from, week: w, to, toWeek: w, toDate: p ? p.date : w, pct: 80, repPct: null, keepReps: keptReps(), publish: false, picks: {}, sizes: loadSizes(), ...freshLines() };
   }
   // Line-by-line overrides on top of the scaling, keyed "<program id>|<block index>|<exercise index or note>":
   //   edits[key + "|" + field] = what the trainer typed (sets, target, suggestKg, extra, note)
@@ -352,8 +353,11 @@
     return body;
   }
   // The scaled copies, worked out fresh from the current choices.
+  // Weight % is c.pct; reps follow it unless "Keep reps the same" is ticked or Reps % was set on its own.
+  const repPct = (c) => (c.keepReps ? 100 : c.repPct != null ? c.repPct : c.pct);
+  const scaleLabel = (c) => (repPct(c) === c.pct ? `${c.pct}%` : `weight ${c.pct}%, reps ${repPct(c)}%`);
   function copyWeekPlan() {
-    const c = state.copyWeek, scale = c.pct / 100;
+    const c = state.copyWeek, scale = { weight: c.pct / 100, reps: repPct(c) / 100 };
     const one = c.mode === "session" ? state.programs.find((x) => x.id === c.pid) : null;
     const progs = c.mode === "session" ? (one ? [one] : []) : ((weeksOf(c.from).find((x) => x.week === c.week) || {}).progs || []);
     const shift = daysBetween(c.week, c.toWeek);
@@ -441,9 +445,11 @@
         ${fromFields}
         <label>To<select id="cw-to">${athleteOptions(c.to)}</select></label>
         ${whenField}
-        <label>Scale %<input id="cw-pct" type="number" min="10" max="300" step="5" inputmode="numeric" value="${c.pct}"></label>
+        <label>Weight %<input id="cw-pct" type="number" min="10" max="300" step="5" inputmode="numeric" value="${c.pct}"></label>
+        <label>Reps %<input id="cw-reppct" type="number" min="10" max="300" step="5" inputmode="numeric" value="${repPct(c)}" ${c.keepReps ? "disabled" : ""}></label>
       </div>
       <div class="lib-cats">${[60, 70, 80, 90, 100, 110, 120].map((n) => `<button type="button" class="chip-btn${n === c.pct ? " on" : ""}" data-act="copyweek-pct" data-n="${n}">${n}%</button>`).join("")}</div>
+      <label class="check"><input type="checkbox" id="cw-keepreps" ${c.keepReps ? "checked" : ""}> Keep the reps the same, only scale the weight</label>
       <details class="cw-sizes"><summary>Dumbbell and kettlebell sizes in your gym</summary>
         <div class="fields"><label class="wide">Dumbbells (kg)<input id="cw-db" value="${esc(c.sizes.db.join(", "))}"></label>
         <label class="wide">Kettlebells (kg)<input id="cw-kb" value="${esc(c.sizes.kb.join(", "))}"></label></div></details>
@@ -458,7 +464,7 @@
     const now = new Date().toISOString();
     const rows = plan.map((x) => ({
       id: newProgramId(x.date), athlete_email: c.to, date: x.date, title: x.src.title, published: c.publish,
-      body: Object.assign(x.body, { copiedFrom: { program: x.src.id, scale: c.pct } }), created_by_email: state.me, updated_at: now,
+      body: Object.assign(x.body, { copiedFrom: { program: x.src.id, scale: c.pct, repScale: repPct(c) } }), created_by_email: state.me, updated_at: now,
     }));
     const { error } = await sb.from("programs").insert(rows);
     if (error) return failed(error);
@@ -473,7 +479,7 @@
     state.copyWeek = null; state.athleteFilter = c.to;
     await loadAll();
     if (c.returnTo) location.hash = c.returnTo; else render();
-    flash(`Copied ${rows.length} session${rows.length > 1 ? "s" : ""} to ${nameOf(c.to)} at ${c.pct}%${c.publish ? "" : " as drafts"}.`, "ok");
+    flash(`Copied ${rows.length} session${rows.length > 1 ? "s" : ""} to ${nameOf(c.to)} at ${scaleLabel(c)}${c.publish ? "" : " as drafts"}.`, "ok");
   }
 
   // ─── week board: every athlete's week side by side ─────────────────────────────────────
@@ -1168,6 +1174,8 @@
       else if (el.id === "cw-toweek") { if (el.value) { c.toWeek = mondayOf(el.value); c.dates = {}; } }
       else if (el.id === "cw-todate") { if (el.value) c.toDate = el.value; }
       else if (el.id === "cw-pct") { const n = Math.round(Number(el.value)); if (n >= 10 && n <= 300) { c.pct = n; c.picks = {}; } }
+      else if (el.id === "cw-reppct") { const n = Math.round(Number(el.value)); if (n >= 10 && n <= 300) c.repPct = n; }
+      else if (el.id === "cw-keepreps") { c.keepReps = el.checked; try { localStorage.setItem("console.keepReps", el.checked ? "1" : "0"); } catch (e) { /* private window */ } }
       else if (el.id === "cw-db" || el.id === "cw-kb") { c.sizes[el.id === "cw-db" ? "db" : "kb"] = PS.parseSizes(el.value, el.id === "cw-db" ? PS.DUMBBELLS : PS.KETTLEBELLS); c.picks = {}; }
       else if (el.id === "cw-publish") { c.publish = el.checked; return; }
       const open = !!($(".cw-sizes") && $(".cw-sizes").open);
@@ -1234,7 +1242,7 @@
     else if (act === "copyline-reset" && state.copyWeek) { const c = state.copyWeek, k = btn.dataset.key; for (const f of LINE_FIELDS.concat("note")) delete c.edits[k + "|" + f]; render(); }
     else if (act === "copyweek-all" && state.copyWeek) { const c = state.copyWeek; c.all[id] = !c.all[id]; render(); }
     else if (act === "copyweek-whole" && state.copyWeek) { startCopyWeek("week", state.copyWeek.pid); render(); }
-    else if (act === "copyweek-pct" && state.copyWeek) { state.copyWeek.pct = Number(btn.dataset.n); state.copyWeek.picks = {}; render(); }
+    else if (act === "copyweek-pct" && state.copyWeek) { Object.assign(state.copyWeek, { pct: Number(btn.dataset.n), repPct: null, picks: {} }); render(); }
     else if (act === "copyweek-cancel") { const back = state.copyWeek && state.copyWeek.returnTo; state.copyWeek = null; if (back) location.hash = back; else render(); }
     else if (act === "week-group") { state.weekGroup = btn.dataset.g || ""; render(); }
     else if (act === "copy-week-row") {
