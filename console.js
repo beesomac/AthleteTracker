@@ -13,7 +13,9 @@
     login: {}, athleteFilter: "", notesFilter: "open", confirm: null,
     editingMember: null, edit: null, reply: null, editingWod: false, fileIds: null,
     fileSessions: [], librarySeed: null, wodSeed: null, wodDraft: null, pendingWod: null,
-    boardMembers: null, boardAsk: null, reorder: null, copyWeek: null, weekGroup: "",   // reorder: { athlete, ids } while reordering programs   // boardMembers null = 007_wod_boards.sql not run yet
+    boardMembers: null, boardAsk: null, reorder: null, copyWeek: null, weekGroup: "",
+    templates: null, tsessions: [], plans: null, calAthlete: "", calGroup: "", planEdit: null, tplFrom: false,   // templates/plans null = 013_program_calendar.sql not run yet
+      // reorder: { athlete, ids } while reordering programs   // boardMembers null = 007_wod_boards.sql not run yet
     builder: { query: "", cat: "", target: null, open: new Set(), confirm: null, libTab: "ex", wodGroup: "open", wodInfo: null },
     libPage: { query: "", cat: "", wodGroup: "open", open: null },
   };
@@ -95,6 +97,13 @@
     // Board members come with 007_wod_boards.sql; before that the console works as it did.
     const bm = await sb.from("wod_board_members").select("*");
     state.boardMembers = bm.error ? null : bm.data;
+    // Templates and plans come with 013_program_calendar.sql; before that the Calendar still shows sessions.
+    const [t, ts, pl] = await Promise.all([
+      sb.from("program_templates").select("*").order("name"),
+      sb.from("template_sessions").select("*").order("day"),
+      sb.from("athlete_plans").select("*").order("start_date"),
+    ]);
+    state.templates = t.error ? null : t.data; state.tsessions = ts.error ? [] : ts.data; state.plans = pl.error ? null : pl.data;
   }
   let reloadTimer = null, pendingRender = false;
   function scheduleReload() {
@@ -118,6 +127,13 @@
     if (h === "programs") return { kind: "programs" };
     if (h === "week") return { kind: "week", week: null };
     if (/^week-\d{4}-\d{2}-\d{2}$/.test(h)) return { kind: "week", week: h.slice(5) };
+    if (h === "calendar") return { kind: "calendar", month: null };
+    if (/^calendar-\d{4}-\d{2}$/.test(h)) return { kind: "calendar", month: h.slice(9) };
+    if (h === "templates") return { kind: "templates" };
+    if (h.startsWith("template-")) return { kind: "template", id: decodeURIComponent(h.slice(9)) };
+    const tn = /^tsession-new-(.+)-(\d+)$/.exec(h);
+    if (tn) return { kind: "program", id: null, tpl: decodeURIComponent(tn[1]), day: Number(tn[2]) };
+    if (h.startsWith("tsession-")) return { kind: "program", id: decodeURIComponent(h.slice(9)), tpl: true };
     if (h === "program-new") return { kind: "program", id: null };
     if (h.startsWith("program-")) return { kind: "program", id: decodeURIComponent(h.slice(8)) };
     if (h === "feedback") return { kind: "feedback" };
@@ -130,12 +146,13 @@
 
   function renderTabs() {
     if (!state.loaded || state.role !== "trainer") { tabs.innerHTML = ""; return; }
-    const v = view().kind;
+    const v = view().kind === "program" && view().tpl ? "template" : view().kind;
     const open = state.notes.filter(needsReview).length;
     const items = [
       ["athletes", "Athletes", v === "athletes"],
       ["programs", "Programs", v === "programs" || v === "program"],
       ["week", "Week", v === "week"],
+      ["calendar", "Calendar", v === "calendar" || v === "templates" || v === "template"],
       ["library", "Library", v === "library"],
       ["feedback", `Feedback${open ? ` <span class="count">${open}</span>` : ""}`, v === "feedback"],
       ["boards", "Leaderboards", v === "boards" || v === "board"],
@@ -359,14 +376,17 @@
   function copyWeekPlan() {
     const c = state.copyWeek, scale = { weight: c.pct / 100, reps: repPct(c) / 100 };
     const one = c.mode === "session" ? state.programs.find((x) => x.id === c.pid) : null;
-    const progs = c.mode === "session" ? (one ? [one] : []) : ((weeksOf(c.from).find((x) => x.week === c.week) || {}).progs || []);
+    const progs = c.mode === "template" ? templateAsPrograms(c.tpl)
+      : c.mode === "session" ? (one ? [one] : []) : ((weeksOf(c.from).find((x) => x.week === c.week) || {}).progs || []);
     const shift = daysBetween(c.week, c.toWeek);
     return progs.map((p) => {
       const r = PS.scaleBody(p.body, scale, { prefix: p.id, picks: c.picks, dumbbells: c.sizes.db, kettlebells: c.sizes.kb });
       const scaled = JSON.parse(JSON.stringify(r.body));
       applyLineEdits(c, p, r.body);
-      const date = c.mode === "session" ? c.toDate : (c.dates[p.id] || addDays(p.date, shift));
-      return Object.assign(r, { src: p, scaled, date, skip: !!c.skip[p.id] });
+      const date = c.mode === "session" ? c.toDate : c.mode === "template" ? (c.dates[p.id] || addDays(c.toDate, p.day)) : (c.dates[p.id] || addDays(p.date, shift));
+      // A template's sessions past the length chosen are left out unless ticked back in.
+      const beyond = c.mode === "template" && p.day >= c.weeks * 7;
+      return Object.assign(r, { src: p, scaled, date, beyond, skip: c.skip[p.id] != null ? !!c.skip[p.id] : beyond });
     });
   }
   // One row per exercise (and WOD description): the original, then editable boxes holding what
@@ -425,14 +445,15 @@
       const { html: lines, shown, hidden } = copyLinesHTML(c, x);
       const pid = esc(x.src.id);
       sessions += `<div class="cw-session${x.skip ? " skipped" : ""}"><div class="cw-head">
-          <label class="check cw-take"><input type="checkbox" data-cw-skip="${pid}" ${x.skip ? "" : "checked"}><h4>${esc(fmtDate(x.src.date))} → ${esc(fmtDate(x.date))} · ${x.src.body.short ? esc(x.src.body.short) + " · " : ""}${esc(x.src.title)}</h4></label>
-          ${c.mode === "week" && !x.skip ? `<label class="cw-date">Date<input type="date" data-cw-date="${pid}" value="${esc(x.date)}"></label>` : ""}</div>
-        ${x.skip ? `<div class="extra">Not copied. Tick it to bring it back.</div>` : `
+          <label class="check cw-take"><input type="checkbox" data-cw-skip="${pid}" ${x.skip ? "" : "checked"}><h4>${esc(x.src.tpl ? weekDayLabel(x.src.day) : fmtDate(x.src.date))} → ${esc(fmtDate(x.date))} · ${x.src.body.short ? esc(x.src.body.short) + " · " : ""}${esc(x.src.title)}</h4></label>
+          ${c.mode !== "session" && !x.skip ? `<label class="cw-date">Date<input type="date" data-cw-date="${pid}" value="${esc(x.date)}"></label>` : ""}</div>
+        ${x.skip ? `<div class="extra">${x.beyond ? `Past the ${c.weeks}-week length, so not copied. Tick it to bring it in anyway.` : "Not copied. Tick it to bring it back."}</div>` : `
         ${picks ? `<div class="cw-picks"><div class="extra">Pick the ${x.choices.some((ch) => ch.kind === "kb") ? "dumbbell or kettlebell" : "dumbbell"}${c.pct < 100 ? " to drop to" : c.pct > 100 ? " to go up to" : ""}:</div>${picks}</div>` : ""}
         ${shown ? `<ul class="cw-lines">${lines}</ul>` : `<div class="extra">Nothing to scale in this one (times, holds and ticks stay as they are).</div>`}
         ${hidden || c.all[x.src.id] ? `<button type="button" class="link" data-act="copyweek-all" data-id="${pid}">${c.all[x.src.id] ? "Show only the changes" : `Show the other ${hidden} exercise${hidden === 1 ? "" : "s"} to edit them too`}</button>` : ""}`}</div>`;
     }
     const single = c.mode === "session", src = single && plan[0] ? plan[0].src : null;
+    if (c.mode === "template") return templateCopyHTML(c, plan, sessions, clash, taking, toName);
     const fromFields = single
       ? `<label class="wide">Session<input readonly value="${src ? esc((src.athlete_email ? nameOf(src.athlete_email) : "All athletes") + " · " + fmtDate(src.date) + " · " + src.title) : "Not found"}"></label>`
       : `<label>From<select id="cw-from">${fromOpts}</select></label>
@@ -462,12 +483,23 @@
   async function saveCopyWeek() {
     const c = state.copyWeek, plan = copyWeekPlan().filter((x) => !x.skip); if (!plan.length) return;
     const now = new Date().toISOString();
-    const rows = plan.map((x) => ({
-      id: newProgramId(x.date), athlete_email: c.to, date: x.date, title: x.src.title, published: c.publish,
-      body: Object.assign(x.body, { copiedFrom: { program: x.src.id, scale: c.pct, repScale: repPct(c) } }), created_by_email: state.me, updated_at: now,
-    }));
+    // Starting a template also starts a plan for the athlete: its name, start date and length.
+    const planId = c.mode === "template" ? "plan-" + Math.random().toString(36).slice(2, 10) : null;
+    if (planId) {
+      const t = (state.templates || []).find((x) => x.id === c.tpl) || {};
+      const pr = await sb.from("athlete_plans").insert({ id: planId, athlete_email: c.to, name: c.planName || t.name || "Program", start_date: c.toDate, weeks: c.weeks, template_id: c.tpl, created_by_email: state.me });
+      if (pr.error) return failed(pr.error);
+    }
+    const rows = plan.map((x) => {
+      const from = planId ? { template: c.tpl, session: x.src.id, scale: c.pct, repScale: repPct(c) } : { program: x.src.id, scale: c.pct, repScale: repPct(c) };
+      const body = Object.assign(x.body, { copiedFrom: from });
+      if (planId) { if (c.seq) body.sequence = true; else delete body.sequence; }
+      const row = { id: newProgramId(x.date), athlete_email: c.to, date: x.date, title: x.src.title, published: c.publish, body, created_by_email: state.me, updated_at: now };
+      if (planId) row.plan_id = planId;
+      return row;
+    });
     const { error } = await sb.from("programs").insert(rows);
-    if (error) return failed(error);
+    if (error) { if (planId) await sb.from("athlete_plans").delete().eq("id", planId); return failed(error); }
     // WOD blocks keep their leaderboard; put the new athlete on it, as saving a program does.
     if (boardsReady()) {
       const ups = [];
@@ -476,7 +508,7 @@
     }
     if (c.publish) for (const r of rows) await notifyWodAgain(r.id, r);
     saveSizes(c.sizes);
-    state.copyWeek = null; state.athleteFilter = c.to;
+    state.copyWeek = null; state.athleteFilter = c.to; if (planId) state.calAthlete = c.to;
     await loadAll();
     if (c.returnTo) location.hash = c.returnTo; else render();
     flash(`Copied ${rows.length} session${rows.length > 1 ? "s" : ""} to ${nameOf(c.to)} at ${scaleLabel(c)}${c.publish ? "" : " as drafts"}.`, "ok");
@@ -544,6 +576,399 @@
       location.hash = "programs";
     });
     app.addEventListener("dragend", () => { dragPid = null; app.querySelectorAll(".wk-chip.dragging,.wk-cell.over").forEach((x) => x.classList.remove("dragging", "over")); });
+  }
+
+  // ─── calendar, plans and templates ─────────────────────────────────────────────────────
+  // Calendar: a month of sessions, for everyone (or a group) or one athlete. Drag a session to
+  // another day to move it; drag a template onto a day to start it there.
+  // Plans (013_program_calendar.sql): a named block of training for one athlete with a start date
+  // and a length in weeks. Sessions belong to a plan through programs.plan_id, so moving the plan's
+  // start date can move its sessions with it.
+  // Templates: reusable programs (e.g. the standard 9-week Jr program). Their sessions are stored by
+  // day (0 = day 1 of week 1). Using one opens the copy screen, so each session can be scaled and
+  // adjusted, and every copy is a NEW program for the athlete (their history stays their own).
+  const TPL_BASE = "2001-01-01";   // a Monday; template sessions are shown on the copy screen from here
+  const plansReady = () => Array.isArray(state.plans);
+  const templatesReady = () => Array.isArray(state.templates);
+  const NEED_013 = `Run <code>supabase/013_program_calendar.sql</code> in Supabase → SQL Editor to add plans and templates.`;
+  const editKey = (v) => (v.tpl ? "t:" + (v.id || v.tpl + ":" + v.day) : "p:" + (v.id || ""));
+  const monthOf = (iso) => String(iso).slice(0, 7);
+  function addMonths(m, n) { const [y, mo] = m.split("-").map(Number); const d = new Date(y, mo - 1 + n, 1); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"); }
+  const monthLabel = (m) => new Date(m + "-01T12:00:00").toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  const fmtShort = (iso) => new Date(String(iso).slice(0, 10) + "T12:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  const planEnd = (pl) => addDays(pl.start_date, pl.weeks * 7 - 1);
+  const weekDayLabel = (day) => `Week ${Math.floor(day / 7) + 1}, day ${(day % 7) + 1}`;
+  function planFor(email, date) {
+    if (!plansReady()) return null;
+    return state.plans.find((pl) => pl.athlete_email === email && date >= pl.start_date && date <= planEnd(pl)) || null;
+  }
+  function planWeek(pl, date) { return Math.floor(daysBetween(pl.start_date, date) / 7) + 1; }
+  function planStatus(pl) {
+    const t = today();
+    if (t < pl.start_date) { const n = daysBetween(t, pl.start_date); return `Starts in ${n} day${n === 1 ? "" : "s"}`; }
+    if (t > planEnd(pl)) return "Finished";
+    return `Week ${planWeek(pl, t)} of ${pl.weeks}`;
+  }
+  const tplSessions = (id) => state.tsessions.filter((s) => s.template_id === id).sort((a, b) => a.day - b.day || String(a.title).localeCompare(String(b.title)));
+  function templateAsPrograms(id) { return tplSessions(id).map((s) => ({ id: s.id, day: s.day, date: addDays(TPL_BASE, s.day), title: s.title, body: s.body || {}, tpl: true })); }
+  const isDone = (pid) => state.finishes.some((f) => f.session_id === pid) || state.notes.some((n) => n.session_id === pid);
+  // In-order programs (body.sequence, like the muscle-up program): number them so the calendar shows the order.
+  function seqNumbers(emails) {
+    const out = {};
+    for (const em of emails) { let n = 0; for (const p of ownPrograms(em)) if (p.body && p.body.sequence === true) out[p.id] = ++n; }
+    return out;
+  }
+
+  function startTemplateCopy(tplId, date, to) {
+    const t = (state.templates || []).find((x) => x.id === tplId); if (!t) return false;
+    to = to || state.calAthlete || (activeAthletes()[0] || {}).email;
+    state.reorder = null; state.edit = null;
+    state.copyWeek = { mode: "template", tpl: t.id, pid: null, from: null, week: null, to, toDate: date || today(), toWeek: null, pct: 100, repPct: null, keepReps: keptReps(), publish: false, picks: {}, sizes: loadSizes(), planName: t.name, weeks: t.weeks, seq: !!t.sequence, ...freshLines() };
+    return true;
+  }
+  // The copy screen when a template is being started (the session list is built by copyWeekHTML).
+  function templateCopyHTML(c, plan, sessions, clash, taking, toName) {
+    const t = (state.templates || []).find((x) => x.id === c.tpl) || { name: "Template", weeks: c.weeks };
+    const tplOpts = (state.templates || []).map((x) => `<option value="${esc(x.id)}" ${x.id === c.tpl ? "selected" : ""}>${esc(x.name)} · ${x.weeks} wk</option>`).join("");
+    const last = addDays(c.toDate, c.weeks * 7 - 1);
+    const overlap = plansReady() ? state.plans.filter((pl) => pl.athlete_email === c.to && pl.start_date <= last && planEnd(pl) >= c.toDate) : [];
+    return `<section class="card"><div class="card-head"><h3>Start a template</h3></div>
+      <div class="extra">Each session in <b>${esc(t.name)}</b> is added as a new program for the athlete, counting from the start date, and the plan (name, start date and length) shows on their calendar. Scale it here, change any line, leave sessions out or move them, and everything can still be edited afterwards like any other program.</div>
+      <div class="fields cw-fields">
+        <label>Template<select id="cw-tpl">${tplOpts}</select></label>
+        <label>To<select id="cw-to">${athleteOptions(c.to)}</select></label>
+        <label>Starts on<input id="cw-todate" type="date" value="${esc(c.toDate)}"></label>
+        <label>Length (weeks)<input id="cw-weeks" type="number" min="1" max="52" inputmode="numeric" value="${c.weeks}"></label>
+        <label class="wide">Plan name<input id="cw-planname" maxlength="80" value="${esc(c.planName || "")}"></label>
+        <label>Weight %<input id="cw-pct" type="number" min="10" max="300" step="5" inputmode="numeric" value="${c.pct}"></label>
+        <label>Reps %<input id="cw-reppct" type="number" min="10" max="300" step="5" inputmode="numeric" value="${repPct(c)}" ${c.keepReps ? "disabled" : ""}></label>
+      </div>
+      <div class="extra">${esc(fmtDate(c.toDate))} to ${esc(fmtDate(last))}${c.weeks !== t.weeks ? ` (the template is ${t.weeks} week${t.weeks === 1 ? "" : "s"})` : ""}.</div>
+      <div class="lib-cats">${[60, 70, 80, 90, 100, 110, 120].map((n) => `<button type="button" class="chip-btn${n === c.pct ? " on" : ""}" data-act="copyweek-pct" data-n="${n}">${n}%</button>`).join("")}</div>
+      <label class="check"><input type="checkbox" id="cw-keepreps" ${c.keepReps ? "checked" : ""}> Keep the reps the same, only scale the weight</label>
+      <label class="check"><input type="checkbox" id="cw-seq" ${c.seq ? "checked" : ""}> Run in session order (the athlete does the next session whenever they train; dates only set the order)</label>
+      <details class="cw-sizes"><summary>Dumbbell and kettlebell sizes in your gym</summary>
+        <div class="fields"><label class="wide">Dumbbells (kg)<input id="cw-db" value="${esc(c.sizes.db.join(", "))}"></label>
+        <label class="wide">Kettlebells (kg)<input id="cw-kb" value="${esc(c.sizes.kb.join(", "))}"></label></div></details>
+      ${overlap.length ? `<div class="banner warn">${esc(toName)} already has ${overlap.map((pl) => `<b>${esc(pl.name)}</b> (${esc(fmtShort(pl.start_date))} – ${esc(fmtShort(planEnd(pl)))})`).join(", ")} in those weeks. Both are kept.</div>` : ""}
+      ${clash.length ? `<div class="banner warn">${esc(toName)} already has a session on ${[...new Set(clash.map((x) => x.date))].map((d) => esc(fmtDate(d))).join(", ")}. The copies are added alongside, nothing is replaced.</div>` : ""}
+      <div class="cw-list">${sessions || `<div class="extra">This template has no sessions yet. <a href="#template-${encodeURIComponent(c.tpl)}">Add some</a>.</div>`}</div>
+      <label class="check"><input type="checkbox" id="cw-publish" ${c.publish ? "checked" : ""}> Publish straight away (otherwise they're saved as drafts to check first)</label>
+      <div class="row"><button class="btn" data-act="copyweek-cancel">Cancel</button><button class="btn primary" data-act="copyweek-save" ${taking ? "" : "disabled"}>Start ${esc(c.planName || t.name)} for ${esc(toName)} (${taking} session${taking === 1 ? "" : "s"})</button></div></section>`;
+  }
+
+  function templatesPanelHTML(who) {
+    if (!templatesReady()) return `<aside class="card cal-side"><div class="card-head"><h3>Templates</h3></div><div class="extra">${NEED_013}</div></aside>`;
+    const items = state.templates.map((t) => {
+      const n = tplSessions(t.id).length;
+      return `<div class="tpl-card" draggable="true" data-tpl="${esc(t.id)}"><span class="grip" aria-hidden="true"></span>
+        <div class="tpl-info"><b>${esc(t.name)}</b><span class="extra">${t.weeks} week${t.weeks === 1 ? "" : "s"} · ${n} session${n === 1 ? "" : "s"}${t.sequence ? " · in order" : ""}</span></div>
+        <div class="tpl-btns"><button type="button" class="btn" data-act="tpl-use" data-id="${esc(t.id)}">Use…</button><a class="btn" href="#template-${encodeURIComponent(t.id)}">Edit</a></div></div>`;
+    }).join("");
+    return `<aside class="card cal-side"><div class="card-head"><h3>Templates</h3><a class="btn" href="#templates">Manage</a></div>
+      ${items || `<div class="extra">No templates yet. <a href="#templates">Make one</a>, e.g. the 9-week Jr program, or save an athlete's weeks as one.</div>`}
+      ${items ? `<div class="extra">Drag a template onto a day to start it there${who ? " for " + esc(nameOf(who)) : ""}. You can scale and adjust it before anything is saved.</div>` : ""}</aside>`;
+  }
+
+  function planFormHTML(pl) {
+    const id = pl ? pl.id : "";
+    return `<form class="inline-form plan-form" id="plan-form" data-id="${esc(id)}">
+      <label class="wide">Name<input name="name" required maxlength="80" value="${esc(pl ? pl.name : "")}" placeholder="e.g. Jr program"></label>
+      <label>Start date<input name="start" type="date" required value="${esc(pl ? pl.start_date : mondayOf(today()))}"></label>
+      <label>Length (weeks)<input name="weeks" type="number" min="1" max="52" required inputmode="numeric" value="${pl ? pl.weeks : 9}"></label>
+      ${pl ? `<label class="check"><input type="checkbox" name="move" checked> If the start date changes, move its sessions too (finished ones stay put)</label>` : ""}
+      <div class="row"><button type="button" class="btn" data-act="plan-cancel">Cancel</button><button class="btn primary">${pl ? "Save plan" : "Add plan"}</button></div></form>`;
+  }
+  function plansCardHTML(who) {
+    if (!plansReady()) return `<section class="card"><div class="extra">${NEED_013}</div></section>`;
+    const mine = state.plans.filter((pl) => pl.athlete_email === who).sort((a, b) => String(b.start_date).localeCompare(String(a.start_date)));
+    const rows = mine.map((pl, i) => {
+      if (state.planEdit === pl.id) return `<li class="editing">${planFormHTML(pl)}</li>`;
+      const n = state.programs.filter((p) => p.plan_id === pl.id).length, key = "del-plan-" + pl.id;
+      const t = pl.template_id && (state.templates || []).find((x) => x.id === pl.template_id);
+      return `<li><span class="plan-dot c${planColor(pl)}" aria-hidden="true"></span>
+        <div class="plan-info"><b>${esc(pl.name)}</b><span class="extra">${esc(fmtShort(pl.start_date))} – ${esc(fmtShort(planEnd(pl)))} · ${pl.weeks} week${pl.weeks === 1 ? "" : "s"} · ${n} session${n === 1 ? "" : "s"}${t ? " · from " + esc(t.name) : ""}</span></div>
+        <span class="chip ${planStatus(pl) === "Finished" ? "info" : "back"}">${esc(planStatus(pl))}</span>
+        <a class="btn" href="#calendar-${monthOf(pl.start_date)}">Show</a>
+        <button type="button" class="btn" data-act="plan-edit" data-id="${esc(pl.id)}">Edit</button>
+        <button type="button" class="btn danger" data-act="del-plan" data-id="${esc(pl.id)}">${state.confirm === key ? "Tap again to delete" : "Delete"}</button></li>`;
+    }).join("");
+    return `<section class="card"><div class="card-head"><h3>${esc(nameOf(who))}'s plans</h3>${state.planEdit === "new" ? "" : `<button type="button" class="btn" data-act="plan-new">New plan</button>`}</div>
+      ${state.planEdit === "new" ? planFormHTML(null) : ""}
+      ${rows ? `<ul class="plan-list">${rows}</ul>` : state.planEdit === "new" ? "" : `<div class="extra">No plans yet. A plan gives a block of training a name, a start date and a length, e.g. a 9-week Jr program. Starting a template makes one for you.</div>`}</section>`;
+  }
+  function planColor(pl) { return plansReady() ? state.plans.filter((x) => x.athlete_email === pl.athlete_email).sort((a, b) => String(a.start_date).localeCompare(String(b.start_date))).indexOf(pl) % 4 : 0; }
+
+  function renderCalendar(v) {
+    const m = v.month || monthOf(today()), first = m + "-01", start = mondayOf(first);
+    const last = addDays(addMonths(m, 1) + "-01", -1);
+    const days = Array.from({ length: Math.ceil((daysBetween(start, last) + 1) / 7) * 7 }, (_, i) => addDays(start, i));
+    if (state.calAthlete && !state.members.some((x) => x.email === state.calAthlete)) state.calAthlete = "";
+    const who = state.calAthlete;
+    const groups = groupsReady() ? allGroups() : [];
+    if (state.calGroup && !groups.includes(state.calGroup)) state.calGroup = "";
+    const member = (em) => state.members.find((x) => x.email === em) || {};
+    const shown = (em) => (who ? em === who : !state.calGroup || (member(em).groups || []).includes(state.calGroup));
+    const progs = state.programs.filter((p) => p.date >= days[0] && p.date <= days[days.length - 1] && (!p.athlete_email || shown(p.athlete_email)));
+    const plans = who && plansReady() ? state.plans.filter((pl) => pl.athlete_email === who && pl.start_date <= days[days.length - 1] && planEnd(pl) >= days[0]) : [];
+    const seq = seqNumbers(new Set(progs.map((p) => p.athlete_email).filter(Boolean)));
+    const MAX = who ? 6 : 4;
+    const chip = (p) => {
+      const own = !!p.athlete_email, n = seq[p.id];
+      return `<a class="cal-chip${p.published ? "" : " draft"}${own ? "" : " shared"}${n ? " seq" : ""}" href="#program-${encodeURIComponent(p.id)}" ${own ? `draggable="true" data-pid="${esc(p.id)}"` : ""} title="${esc((own ? nameOf(p.athlete_email) : "All athletes") + " · " + p.title + (p.published ? "" : " (draft)") + (n ? " · session " + n + " in order" : ""))}">
+        ${!who ? `<span class="cal-who">${esc(own ? nameOf(p.athlete_email) : "All")}</span>` : ""}<span class="cal-t">${n ? `<span class="cal-n">#${n}</span>${esc(p.title)}` : esc((p.body && p.body.short) || p.title)}</span></a>`;
+    };
+    const cells = days.map((d, i) => {
+      const mine = progs.filter((p) => p.date === d).sort((a, b) => String(a.athlete_email || "").localeCompare(String(b.athlete_email || "")) || String(a.id).localeCompare(String(b.id)));
+      const bands = plans.filter((pl) => d >= pl.start_date && d <= planEnd(pl)).map((pl) => {
+        const label = d === pl.start_date || i % 7 === 0;
+        return `<div class="cal-band c${planColor(pl)}" title="${esc(pl.name)} · week ${planWeek(pl, d)} of ${pl.weeks}">${label ? `${esc(pl.name)} · wk ${planWeek(pl, d)}` : "&nbsp;"}</div>`;
+      }).join("");
+      const more = mine.length - MAX;
+      return `<div class="cal-cell${monthOf(d) !== m ? " out" : ""}${d === today() ? " today" : ""}" data-date="${d}">
+        <div class="cal-day">${Number(d.slice(8))}${d.slice(8) === "01" ? " " + esc(new Date(d + "T12:00:00").toLocaleDateString(undefined, { month: "short" })) : ""}</div>
+        ${bands}${mine.slice(0, more > 0 ? MAX - 1 : MAX).map(chip).join("")}
+        ${more > 0 ? `<a class="cal-more" href="#week-${mondayOf(d)}">+${more + 1} more</a>` : ""}</div>`;
+    }).join("");
+    const head = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((x) => `<div class="cal-h">${x}</div>`).join("");
+    const anySeq = Object.keys(seq).length > 0;
+    return `<section class="hero"><div class="eyebrow">${who ? esc(nameOf(who)) : state.calGroup ? esc(state.calGroup) : "All athletes"}</div><h2>Calendar</h2>
+      <div class="toolbar"><a class="btn" href="#calendar-${addMonths(m, -1)}" aria-label="Previous month">‹</a><span class="wk-label">${esc(monthLabel(m))}</span><a class="btn" href="#calendar-${addMonths(m, 1)}" aria-label="Next month">›</a>
+        ${m !== monthOf(today()) ? `<a class="btn" href="#calendar">This month</a>` : ""}
+        <select class="cal-athlete" aria-label="Athlete"><option value="">Everyone</option>${activeAthletes().map((a) => `<option value="${esc(a.email)}" ${a.email === who ? "selected" : ""}>${esc(a.display_name || a.email)}</option>`).join("")}</select></div>
+      ${!who && groups.length ? `<div class="lib-cats wk-groups"><button type="button" class="chip-btn${state.calGroup ? "" : " on"}" data-act="cal-group" data-g="">Everyone</button>${groups.map((g) => `<button type="button" class="chip-btn${g === state.calGroup ? " on" : ""}" data-act="cal-group" data-g="${esc(g)}">${esc(g)}</button>`).join("")}</div>` : ""}
+      <div class="extra">Drag a session to another day to move it. Tap one to open it.${anySeq ? " Sessions marked #1, #2… run in session order: the athlete does the next one whenever they train, so their dates only set the order." : ""}</div></section>
+      ${who ? plansCardHTML(who) : ""}
+      <div class="cal-layout"><div class="card cal-card"><div class="cal-grid">${head}${cells}</div></div>${templatesPanelHTML(who)}</div>`;
+  }
+
+  // ─── templates ─────────────────────────────────────────────────────────────────────────
+  function renderTemplates() {
+    const hero = `<section class="hero"><div class="eyebrow"><a href="#calendar">Calendar</a> /</div><h2>Templates</h2>
+      <div class="extra">A template is a program you reuse, e.g. the standard 9-week Jr program. Start it for an athlete from the Calendar (drag it onto a day) or with Use…, then adjust their copy.</div></section>`;
+    if (!templatesReady()) return hero + `<div class="empty"><strong>One database step first</strong><span>${NEED_013}</span></div>`;
+    const rows = state.templates.map((t) => {
+      const n = tplSessions(t.id).length, used = plansReady() ? state.plans.filter((pl) => pl.template_id === t.id).length : 0;
+      return `<tr><td data-l="Template"><a href="#template-${encodeURIComponent(t.id)}"><b>${esc(t.name)}</b></a>${t.description ? `<div class="extra">${esc(t.description)}</div>` : ""}</td>
+        <td data-l="Length">${t.weeks} week${t.weeks === 1 ? "" : "s"}${t.sequence ? ` <span class="extra">in order</span>` : ""}</td><td data-l="Sessions">${n}</td><td data-l="Used">${used ? `${used} time${used === 1 ? "" : "s"}` : `<span class="extra">–</span>`}</td>
+        <td class="actions"><a class="btn" href="#template-${encodeURIComponent(t.id)}">Edit</a><button class="btn" data-act="tpl-use" data-id="${esc(t.id)}">Use…</button></td></tr>`;
+    }).join("");
+    const withProgs = athletes().filter((a) => ownPrograms(a.email).length);
+    return hero + `${rows ? `<div class="card table-card"><table class="grid"><thead><tr><th>Template</th><th>Length</th><th>Sessions</th><th>Used</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : ""}
+      <section class="card"><div class="card-head"><h3>New template</h3></div>
+        <form class="inline-form" id="tpl-new"><label class="wide">Name<input name="name" required maxlength="80" placeholder="e.g. Jr program"></label>
+          <label>Length (weeks)<input name="weeks" type="number" min="1" max="52" value="9" required inputmode="numeric"></label>
+          <label class="check"><input type="checkbox" name="sequence"> Runs in session order</label>
+          <div class="row"><button class="btn primary">Create</button></div></form></section>
+      ${withProgs.length ? `<section class="card"><div class="card-head"><h3>Save an athlete's weeks as a template</h3></div>
+        <div class="extra">Takes a copy of every session the athlete has from the start date for that many weeks. Their own programs aren't changed.</div>
+        <form class="inline-form" id="tpl-from"><label>Athlete<select name="athlete">${withProgs.map((a) => `<option value="${esc(a.email)}">${esc(a.display_name || a.email)}</option>`).join("")}</select></label>
+          <label>From<input name="start" type="date" required value="${esc(mondayOf(today()))}"></label>
+          <label>Weeks<input name="weeks" type="number" min="1" max="52" value="9" required inputmode="numeric"></label>
+          <label class="wide">Template name<input name="name" required maxlength="80" placeholder="e.g. Jr program"></label>
+          <div class="row"><button class="btn primary">Save as template</button></div></form></section>` : ""}`;
+  }
+  function renderTemplate(v) {
+    if (!templatesReady()) return renderTemplates();
+    const t = state.templates.find((x) => x.id === v.id);
+    if (!t) return `<div class="empty"><strong>Template not found</strong><span><a href="#templates">Back to templates</a></span></div>`;
+    const ss = tplSessions(t.id), lastWeek = Math.max(t.weeks, ss.length ? Math.floor(ss[ss.length - 1].day / 7) + 1 : 1);
+    const id = encodeURIComponent(t.id), key = "del-template-" + t.id;
+    let grid = `<tr><th></th>${[1, 2, 3, 4, 5, 6, 7].map((d) => `<th>Day ${d}</th>`).join("")}</tr>`;
+    for (let w = 0; w < lastWeek; w++) {
+      grid += `<tr class="${w >= t.weeks ? "tpl-past" : ""}"><th><b>Week ${w + 1}</b>${w >= t.weeks ? `<span class="extra">past the length</span>` : ""}</th>`;
+      for (let d = 0; d < 7; d++) {
+        const day = w * 7 + d;
+        grid += `<td class="tpl-cell" data-day="${day}">${ss.filter((s) => s.day === day).map((s) => `<a class="wk-chip tpl-chip" draggable="true" data-tsid="${esc(s.id)}" href="#tsession-${encodeURIComponent(s.id)}">${s.body && s.body.short ? `<span class="wk-short">${esc(s.body.short)}</span>` : ""}<span class="wk-title">${esc(s.title)}</span></a>`).join("")}
+          <a class="tpl-add" href="#tsession-new-${id}-${day}" aria-label="Add a session on week ${w + 1}, day ${d + 1}">+</a></td>`;
+      }
+      grid += `</tr>`;
+    }
+    return `<section class="hero"><div class="eyebrow"><a href="#templates">Templates</a> /</div><h2>${esc(t.name)}</h2>
+      <div class="toolbar"><button class="btn primary" data-act="tpl-use" data-id="${esc(t.id)}">Use this template…</button>
+        <button class="btn" data-act="tpl-dup" data-id="${esc(t.id)}">Duplicate</button>
+        <button class="btn danger" data-act="del-template" data-id="${esc(t.id)}">${state.confirm === key ? "Tap again to delete" : "Delete"}</button></div></section>
+      <form class="card fields" id="tpl-form" data-id="${esc(t.id)}">
+        <label class="wide">Name<input name="name" required maxlength="80" value="${esc(t.name)}"></label>
+        <label>Length (weeks)<input name="weeks" type="number" min="1" max="52" required inputmode="numeric" value="${t.weeks}"></label>
+        <label class="wide">Notes<input name="description" maxlength="300" value="${esc(t.description || "")}" placeholder="Who it's for, what it builds"></label>
+        <label class="check"><input type="checkbox" name="sequence" ${t.sequence ? "checked" : ""}> Runs in session order</label>
+        <div class="row"><button class="btn">Save details</button></div></form>
+      <div class="extra">Day 1 is whatever day the template starts on. Press + to add a session, tap one to edit it in the builder, or drag it to another day. Athletes who already started this template keep their own copies.</div>
+      <div class="card table-card wk-card"><div class="wk-scroll"><table class="wk-grid tpl-grid">${grid}</table></div></div>`;
+  }
+  // The program editor, for a session in a template: week and day instead of athlete and date.
+  function startTplEdit(v) {
+    const s = v.id ? state.tsessions.find((x) => x.id === v.id) : null;
+    if (v.id && !s) return null;
+    const tplId = s ? s.template_id : v.tpl;
+    if (!(state.templates || []).some((x) => x.id === tplId)) return null;
+    const body = JSON.parse(JSON.stringify(s ? s.body : TEMPLATE));
+    delete body.id; delete body.date; delete body.title; delete body.copiedFrom;
+    if (!s) body.short = "Session " + (tplSessions(tplId).length + 1);
+    state.pendingWod = null;
+    state.edit = { id: s ? s.id : null, vkey: editKey(v), tpl: { id: tplId, day: s ? s.day : v.day || 0 }, athlete: "", date: today(), title: s ? s.title : "", published: false,
+      text: JSON.stringify(body, null, 1), body, mode: "builder", hasFeedback: false };
+    Object.assign(state.builder, { query: "", cat: "", target: null, open: new Set(), confirm: null });
+    return state.edit;
+  }
+  function syncTplDay(f) {
+    if (!state.edit || !state.edit.tpl || !f.elements.tweek) return;
+    state.edit.tpl.day = (Number(f.elements.tweek.value) - 1) * 7 + Number(f.elements.tday.value) - 1;
+  }
+  function renderTplSession(e) {
+    const t = state.templates.find((x) => x.id === e.tpl.id), chk = checkProgram(e.text);
+    const w = Math.floor(e.tpl.day / 7) + 1, d = (e.tpl.day % 7) + 1, weeks = Math.max(t.weeks, w);
+    const back = "#template-" + encodeURIComponent(t.id);
+    return `<section class="hero"><div class="eyebrow"><a href="#templates">Templates</a> / <a href="${back}">${esc(t.name)}</a> /</div><h2>${e.id ? "Edit template session" : "New template session"}</h2></section>
+      <form id="program-form" class="editor">
+        <div class="card fields">
+          <label>Week<select name="tweek">${Array.from({ length: weeks }, (_, i) => `<option value="${i + 1}" ${i + 1 === w ? "selected" : ""}>Week ${i + 1}</option>`).join("")}</select></label>
+          <label>Day<select name="tday">${[1, 2, 3, 4, 5, 6, 7].map((i) => `<option value="${i}" ${i === d ? "selected" : ""}>Day ${i}</option>`).join("")}</select></label>
+          <label class="wide">Title<input name="title" required maxlength="120" value="${esc(e.title)}" placeholder="e.g. Speed & Power"></label>
+          <label class="file btn"><input type="file" accept=".json,application/json" id="program-file">Upload .json</label>
+        </div>
+        <div class="mode-tabs" role="tablist"><button type="button" role="tab" data-act="edit-mode" data-mode="builder" aria-selected="${e.mode === "builder"}">Builder</button><button type="button" role="tab" data-act="edit-mode" data-mode="json" aria-selected="${e.mode === "json"}">JSON</button></div>
+        ${e.mode === "builder" ? `<div id="builder-root">${PB.render(e.body, library(), state.builder)}</div><div id="program-check" class="builder-check">${checkHTML(chk)}</div>` : `<div class="split">
+          <div class="card"><div class="card-head"><h3>Session JSON</h3></div>
+            <textarea id="program-json" spellcheck="false" aria-label="Session JSON">${esc(e.text)}</textarea>
+            <div id="program-check">${checkHTML(chk)}</div></div>
+          <div class="card"><div class="card-head"><h3>Preview</h3></div><div id="program-preview">${previewHTML(chk.body)}</div></div>
+        </div>`}
+        <div class="row sticky-actions">${e.id ? `<button type="button" class="btn danger" data-act="del-tsession" data-id="${esc(e.id)}">${state.confirm === "del-tsession-" + e.id ? "Tap again to delete" : "Delete"}</button>` : ""}<a class="btn" href="${back}">Cancel</a><button class="btn primary" ${chk.errors && chk.errors.length ? "disabled" : ""}>Save session</button></div>
+      </form>`;
+  }
+  async function saveTplSession(f) {
+    const e = state.edit, chk = checkProgram(e.text);
+    if (chk.errors.length) { flash("Fix the problems in the JSON first."); return; }
+    syncTplDay(f);
+    const body = withoutEmptyBlocks(chk.body); delete body.id; delete body.date; delete body.title;
+    const row = { template_id: e.tpl.id, day: e.tpl.day, title: val(f, "title"), body, updated_at: new Date().toISOString() };
+    const q = e.id ? sb.from("template_sessions").update(row).eq("id", e.id) : sb.from("template_sessions").insert(row);
+    if (await run(q, "Template session saved.")) { state.edit = null; location.hash = "template-" + encodeURIComponent(e.tpl.id); }
+  }
+  // Snapshot an athlete's sessions from a start date for N weeks into a new template.
+  async function templateFromAthlete(email, start, weeks, name) {
+    const end = addDays(start, weeks * 7 - 1);
+    const src = ownPrograms(email).filter((p) => p.date >= start && p.date <= end);
+    if (!src.length) { flash(`${nameOf(email)} has no sessions between ${fmtDate(start)} and ${fmtDate(end)}.`); return; }
+    const seqAll = src.every((p) => p.body && p.body.sequence === true);
+    const { data, error } = await sb.from("program_templates").insert({ name, weeks, sequence: seqAll, description: `From ${nameOf(email)}'s sessions, ${fmtShort(start)} – ${fmtShort(end)}`, created_by_email: state.me }).select().single();
+    if (error) return failed(error);
+    const rows = src.map((p) => {
+      const body = JSON.parse(JSON.stringify(p.body || {})); delete body.copiedFrom;
+      return { template_id: data.id, day: daysBetween(start, p.date), title: p.title, body };
+    });
+    const r = await sb.from("template_sessions").insert(rows);
+    if (r.error) { await sb.from("program_templates").delete().eq("id", data.id); return failed(r.error); }
+    await loadAll(); location.hash = "template-" + encodeURIComponent(data.id);
+    flash(`Saved ${rows.length} session${rows.length === 1 ? "" : "s"} as ${name}.`, "ok");
+  }
+  async function duplicateTemplate(id) {
+    const t = state.templates.find((x) => x.id === id); if (!t) return;
+    const { data, error } = await sb.from("program_templates").insert({ name: t.name + " (copy)", weeks: t.weeks, sequence: t.sequence, description: t.description, created_by_email: state.me }).select().single();
+    if (error) return failed(error);
+    const rows = tplSessions(id).map((s) => ({ template_id: data.id, day: s.day, title: s.title, body: s.body }));
+    if (rows.length) { const r = await sb.from("template_sessions").insert(rows); if (r.error) return failed(r.error); }
+    await loadAll(); location.hash = "template-" + encodeURIComponent(data.id); flash("Duplicated. Rename it and change what you need.", "ok");
+  }
+  async function savePlan(f) {
+    const id = f.dataset.id, name = val(f, "name"), start = val(f, "start"), weeks = Math.round(Number(val(f, "weeks")));
+    if (!name || !start || !(weeks >= 1 && weeks <= 52)) { flash("A plan needs a name, a start date and a length of 1 to 52 weeks."); return; }
+    const now = new Date().toISOString(), who = id ? (state.plans.find((x) => x.id === id) || {}).athlete_email : state.calAthlete;
+    const pid = id || "plan-" + Math.random().toString(36).slice(2, 10);
+    const old = id && state.plans.find((x) => x.id === id);
+    const res = id ? await sb.from("athlete_plans").update({ name, start_date: start, weeks, updated_at: now }).eq("id", id)
+      : await sb.from("athlete_plans").insert({ id: pid, athlete_email: who, name, start_date: start, weeks, created_by_email: state.me });
+    if (res.error) return failed(res.error);
+    const jobs = [];
+    let moved = 0;
+    // Moving the start date moves the plan's sessions by the same number of days (not the finished ones).
+    if (old && old.start_date !== start && checked(f, "move")) {
+      const shift = daysBetween(old.start_date, start);
+      for (const p of state.programs.filter((x) => x.plan_id === id && !isDone(x.id))) { moved++; jobs.push(sb.from("programs").update({ date: addDays(p.date, shift), updated_at: now }).eq("id", p.id)); }
+    }
+    // Sessions already in those dates that aren't in a plan join this one.
+    const end = addDays(start, weeks * 7 - 1), shiftOf = old && old.start_date !== start && checked(f, "move") ? daysBetween(old.start_date, start) : 0;
+    const adopt = state.programs.filter((p) => p.athlete_email === who && !p.plan_id && p.date >= start && p.date <= end);
+    if (adopt.length) jobs.push(sb.from("programs").update({ plan_id: pid }).in("id", adopt.map((p) => p.id)));
+    const bad = (await Promise.all(jobs)).find((x) => x.error);
+    if (bad) failed(bad.error);
+    state.planEdit = null;
+    await loadAll(); render();
+    flash(`${id ? "Plan saved" : "Plan added"}${moved ? `, ${moved} session${moved === 1 ? "" : "s"} moved ${Math.abs(shiftOf)} day${Math.abs(shiftOf) === 1 ? "" : "s"} ${shiftOf > 0 ? "later" : "earlier"}` : ""}${adopt.length ? `, ${adopt.length} session${adopt.length === 1 ? "" : "s"} added to it` : ""}.`, "ok");
+  }
+
+  app.addEventListener("submit", async (ev) => {
+    const f = ev.target;
+    if (!["plan-form", "tpl-new", "tpl-from", "tpl-form"].includes(f.id)) return;
+    ev.preventDefault();
+    if (f.id === "plan-form") return savePlan(f);
+    if (f.id === "tpl-new") {
+      const weeks = Math.round(Number(val(f, "weeks"))) || 1;
+      const { data, error } = await sb.from("program_templates").insert({ name: val(f, "name"), weeks, sequence: checked(f, "sequence"), created_by_email: state.me }).select().single();
+      if (error) return failed(error);
+      await loadAll(); location.hash = "template-" + encodeURIComponent(data.id);
+    }
+    if (f.id === "tpl-from") return templateFromAthlete(val(f, "athlete"), val(f, "start"), Math.round(Number(val(f, "weeks"))) || 1, val(f, "name"));
+    if (f.id === "tpl-form") {
+      await run(sb.from("program_templates").update({ name: val(f, "name"), weeks: Math.round(Number(val(f, "weeks"))) || 1, description: val(f, "description") || null, sequence: checked(f, "sequence"), updated_at: new Date().toISOString() }).eq("id", f.dataset.id), "Template saved.");
+    }
+  });
+  app.addEventListener("change", (ev) => {
+    if (ev.target.classList.contains("cal-athlete")) { state.calAthlete = ev.target.value; state.planEdit = null; render(); }
+  });
+  document.addEventListener("click", async (ev) => {
+    const btn = ev.target.closest("[data-act]"); if (!btn) return;
+    const act = btn.dataset.act, id = btn.dataset.id;
+    if (act === "cal-group") { state.calGroup = btn.dataset.g || ""; render(); }
+    else if (act === "tpl-use") { if (startTemplateCopy(id, state.calAthlete ? null : today(), null)) { state.copyWeek.returnTo = location.hash.slice(1) || "calendar"; if (location.hash !== "#programs") location.hash = "programs"; else render(); } }
+    else if (act === "tpl-dup") { btn.disabled = true; await duplicateTemplate(id); }
+    else if (act === "plan-new") { state.planEdit = "new"; render(); }
+    else if (act === "plan-edit") { state.planEdit = id; render(); }
+    else if (act === "plan-cancel") { state.planEdit = null; render(); }
+    else if (act === "del-plan") {
+      if (!armed("del-plan-" + id)) return;
+      await run(sb.from("athlete_plans").delete().eq("id", id), "Plan deleted. Its sessions are kept.");
+    } else if (act === "del-template") {
+      if (!armed("del-template-" + id)) return;
+      if (await run(sb.from("program_templates").delete().eq("id", id), "Template deleted. Athletes who started it keep their sessions.")) location.hash = "templates";
+    } else if (act === "del-tsession") {
+      if (!armed("del-tsession-" + id)) return;
+      const back = state.edit && state.edit.tpl ? state.edit.tpl.id : null;
+      if (await run(sb.from("template_sessions").delete().eq("id", id), "Session removed from the template.")) { state.edit = null; if (back) location.hash = "template-" + encodeURIComponent(back); }
+    }
+  });
+  // Drag and drop: sessions between calendar days, templates onto a day, template sessions between days.
+  {
+    let drag = null;   // { pid } | { tpl } | { tsid }
+    const target = (ev) => ev.target.closest && (drag && drag.tsid ? ev.target.closest(".tpl-cell") : ev.target.closest(".cal-cell"));
+    app.addEventListener("dragstart", (ev) => {
+      const el = ev.target.closest && ev.target.closest(".cal-chip[data-pid],.tpl-card,.tpl-chip"); if (!el) return;
+      drag = el.dataset.pid ? { pid: el.dataset.pid } : el.dataset.tpl ? { tpl: el.dataset.tpl } : { tsid: el.dataset.tsid };
+      el.classList.add("dragging"); ev.dataTransfer.effectAllowed = drag.tpl ? "copy" : "move"; ev.dataTransfer.setData("text/plain", "calendar");
+    });
+    app.addEventListener("dragover", (ev) => {
+      if (!drag) return; const cell = target(ev); if (!cell) return;
+      ev.preventDefault(); ev.dataTransfer.dropEffect = drag.tpl ? "copy" : "move";
+      app.querySelectorAll(".cal-cell.over,.tpl-cell.over").forEach((x) => x !== cell && x.classList.remove("over")); cell.classList.add("over");
+    });
+    app.addEventListener("drop", async (ev) => {
+      if (!drag) return; const cell = target(ev); if (!cell) return;
+      ev.preventDefault(); const d = drag; drag = null;
+      if (d.tpl) {
+        if (startTemplateCopy(d.tpl, cell.dataset.date, state.calAthlete || null)) { state.copyWeek.returnTo = location.hash.slice(1) || "calendar"; location.hash = "programs"; }
+        return;
+      }
+      if (d.tsid) {
+        const s = state.tsessions.find((x) => x.id === d.tsid), day = Number(cell.dataset.day); if (!s || s.day === day) { render(); return; }
+        await run(sb.from("template_sessions").update({ day, updated_at: new Date().toISOString() }).eq("id", s.id), `Moved ${s.title} to ${weekDayLabel(day).toLowerCase()}.`);
+        return;
+      }
+      const p = state.programs.find((x) => x.id === d.pid), date = cell.dataset.date; if (!p || p.date === date) { render(); return; }
+      await run(sb.from("programs").update({ date, updated_at: new Date().toISOString() }).eq("id", p.id), `Moved ${p.title} to ${fmtDate(date)}.`);
+    });
+    app.addEventListener("dragend", () => { drag = null; app.querySelectorAll(".cal-chip.dragging,.tpl-card.dragging,.tpl-chip.dragging,.cal-cell.over,.tpl-cell.over").forEach((x) => x.classList.remove("dragging", "over")); });
   }
 
   // A new program starts with the usual block layout, empty; drag exercises in from the library.
@@ -626,7 +1051,7 @@
       title: p ? p.title : "",
       published: p ? p.published : false,
       text: JSON.stringify(body, null, 1),
-      body, mode: "builder",
+      body, mode: "builder", vkey: "p:" + (p ? p.id : ""),
       hasFeedback: p ? state.notes.some((n) => n.session_id === p.id) || state.finishes.some((f) => f.session_id === p.id) : false,
     };
     Object.assign(state.builder, { query: "", cat: "", target: null, open: new Set(), confirm: null });
@@ -670,6 +1095,7 @@
   // Under a WOD block in the builder: its leaderboard, and how the athlete did before.
   state.builder.wodInfo = (b) => {
     if (!state.edit) return "";
+    if (state.edit.tpl) return "The leaderboard is picked for each athlete after the template is used.";
     const parts = [];
     const board = b.board && state.wods.find((w) => w.id === b.board);
     const bi = state.edit.body.blocks.indexOf(b);
@@ -683,7 +1109,7 @@
   };
   PB.mount(app, {
     // A WOD dropped into the program: ask about its leaderboard straight away.
-    wodAdded: (bi) => { if (state.edit) openBoardAsk([bi], state.edit.athlete || null, { onSave: false }); },
+    wodAdded: (bi) => { if (state.edit && !state.edit.tpl) openBoardAsk([bi], state.edit.athlete || null, { onSave: false }); },
     body: () => state.edit.body,
     lib: () => library(),
     ui: state.builder,
@@ -804,8 +1230,9 @@
   }
 
   function renderProgram(v) {
-    if (!state.edit || state.edit.id !== v.id) if (!startEdit(v.id)) return `<div class="empty"><strong>Program not found</strong><span><a href="#programs">Back to programs</a></span></div>`;
+    if (!state.edit || state.edit.vkey !== editKey(v)) if (!(v.tpl ? startTplEdit(v) : startEdit(v.id))) return `<div class="empty"><strong>${v.tpl ? "Template session" : "Program"} not found</strong><span><a href="#${v.tpl ? "templates" : "programs"}">Back</a></span></div>`;
     const e = state.edit;
+    if (e.tpl) return renderTplSession(e);
     const chk = checkProgram(e.text);
     const saved = e.id && state.programs.find((p) => p.id === e.id);
     return `<section class="hero"><div class="eyebrow"><a href="#programs">Programs</a> /</div><h2>${e.id ? "Edit program" : "New program"}</h2>
@@ -1013,6 +1440,9 @@
     else if (!state.loaded) html = `<div class="hero"><div class="eyebrow">Loading</div><h2>Opening the console…</h2></div><div class="skeleton"></div>`;
     else if (v.kind === "programs") html = renderPrograms();
     else if (v.kind === "week") html = renderWeek(v);
+    else if (v.kind === "calendar") html = renderCalendar(v);
+    else if (v.kind === "templates") html = renderTemplates();
+    else if (v.kind === "template") html = renderTemplate(v);
     else if (v.kind === "program") {
       html = renderProgram(v);
       if (state.askAfterRender != null && state.edit) { const bi = state.askAfterRender; state.askAfterRender = null; openBoardAsk([bi], state.edit.athlete || null, { onSave: false }); return; }
@@ -1057,6 +1487,8 @@
         if (f.elements.also_athlete) upd.also_athlete = upd.role === "trainer" && checked(f, "also_athlete");
         if (f.elements.groups) upd.groups = [...new Set(val(f, "groups").split(",").map((g) => g.trim()).filter(Boolean))];
         await run(sb.from("members").update(upd).eq("email", email));
+      } else if (f.id === "program-form" && state.edit && state.edit.tpl) {
+        await saveTplSession(f);
       } else if (f.id === "program-form") {
         const e = state.edit; const chk = checkProgram(e.text);
         if (chk.errors.length) { flash("Fix the problems in the JSON first."); return; }
@@ -1071,6 +1503,9 @@
           for (const b of body.blocks) if (b && b.board) for (const em of programAthletes(row.athlete_email)) ups.push({ wod_id: b.board, athlete_email: em, added_by_email: state.me });
           if (ups.length) { const r = await sb.from("wod_board_members").upsert(ups, { onConflict: "wod_id,athlete_email", ignoreDuplicates: true }); if (r.error) console.warn(r.error); }
         }
+        // A new session that falls inside one of the athlete's plans joins it (so it moves with the plan).
+        const inPlan = !e.id && row.athlete_email && planFor(row.athlete_email, row.date);
+        if (inPlan) row.plan_id = inPlan.id;
         const pid = e.id || newProgramId(row.date);
         const q = e.id ? sb.from("programs").update(row).eq("id", e.id) : sb.from("programs").insert(Object.assign({ id: pid }, row));
         if (await run(q, "Program saved.")) {
@@ -1141,6 +1576,7 @@
     } else if (ev.target.form && ev.target.form.id === "program-form" && state.edit && !ev.target.closest(".builder")) {
       const f = ev.target.form;
       Object.assign(state.edit, { athlete: val(f, "athlete"), date: val(f, "date"), title: f.elements.title.value, published: checked(f, "published") });
+      syncTplDay(f);
     }
   });
   app.addEventListener("change", async (ev) => {
@@ -1178,6 +1614,10 @@
       else if (el.id === "cw-keepreps") { c.keepReps = el.checked; try { localStorage.setItem("console.keepReps", el.checked ? "1" : "0"); } catch (e) { /* private window */ } }
       else if (el.id === "cw-db" || el.id === "cw-kb") { c.sizes[el.id === "cw-db" ? "db" : "kb"] = PS.parseSizes(el.value, el.id === "cw-db" ? PS.DUMBBELLS : PS.KETTLEBELLS); c.picks = {}; }
       else if (el.id === "cw-publish") { c.publish = el.checked; return; }
+      else if (el.id === "cw-planname") { c.planName = el.value.trim(); return; }
+      else if (el.id === "cw-seq") { c.seq = el.checked; return; }
+      else if (el.id === "cw-weeks") { const n = Math.round(Number(el.value)); if (n >= 1 && n <= 52) { c.weeks = n; c.skip = {}; } }
+      else if (el.id === "cw-tpl") { const t = (state.templates || []).find((x) => x.id === el.value); if (t) Object.assign(c, { tpl: t.id, planName: t.name, weeks: t.weeks, seq: !!t.sequence, picks: {} }, freshLines()); }
       const open = !!($(".cw-sizes") && $(".cw-sizes").open);
       render(); if (open && $(".cw-sizes")) $(".cw-sizes").open = true;
       return;
@@ -1200,6 +1640,7 @@
     if (el.form && el.form.id === "program-form" && state.edit && !el.closest(".builder")) {
       const f = el.form;
       Object.assign(state.edit, { athlete: val(f, "athlete"), date: val(f, "date"), title: f.elements.title.value, published: checked(f, "published") });
+      syncTplDay(f);
       if (el.name === "athlete" && state.edit.mode === "builder") renderBuilder();
     }
   });
@@ -1301,6 +1742,7 @@
     state.confirm = null; state.editingMember = null; state.reply = null; state.editingWod = false;
     if (view().kind !== "program") state.edit = null;
     if (view().kind !== "boards") state.wodDraft = null;
+    if (view().kind !== "calendar") state.planEdit = null;
     state.boardAsk = null;
     render(); window.scrollTo(0, 0);
   });
@@ -1343,7 +1785,7 @@
     });
     if (channel) sb.removeChannel(channel);
     channel = sb.channel("trainer-console");
-    for (const table of ["members", "programs", "notes", "session_finishes", "wods", "wod_results", "ticks", "wod_board_members"]) channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, scheduleReload);
+    for (const table of ["members", "programs", "notes", "session_finishes", "wods", "wod_results", "ticks", "wod_board_members", "program_templates", "template_sessions", "athlete_plans"]) channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, scheduleReload);
     channel.subscribe();
     document.addEventListener("visibilitychange", () => { if (!document.hidden) scheduleReload(); });
     render();
