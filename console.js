@@ -18,7 +18,13 @@
     libPage: { query: "", cat: "", wodGroup: "open", open: null },
   };
   const PB = window.ProgramBuilder;
+  // Coaches (014) sign in here for Bookings only; trainers get everything.
+  const isStaffRole = (r) => r === "trainer" || r === "coach";
   const PS = window.ProgramScale;
+  const BK = window.ConsoleBookings.create({
+    sb, state, esc, flash: (m, k) => flash(m, k), failed: (e) => failed(e), render: () => render(), reload: () => scheduleReload(),
+    run: (p, m) => run(p, m), armed: (k) => armed(k), nameOf: (e) => nameOf(e), allGroups: () => allGroups(),
+  });
 
   // ─── helpers ──────────────────────────────────────────────────────────────────────────
   function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
@@ -82,6 +88,13 @@
 
   // ─── data ─────────────────────────────────────────────────────────────────────────────
   async function loadAll() {
+    if (state.role === "coach") {
+      const m = await sb.from("members").select("*").order("display_name");
+      if (m.error) throw m.error;
+      Object.assign(state, { members: m.data, loaded: true });
+      await BK.load();
+      return;
+    }
     const [m, p, n, f, w, r] = await Promise.all([
       sb.from("members").select("*").order("display_name"),
       sb.from("programs").select("*").order("date", { ascending: false }),
@@ -95,6 +108,7 @@
     // Board members come with 007_wod_boards.sql; before that the console works as it did.
     const bm = await sb.from("wod_board_members").select("*");
     state.boardMembers = bm.error ? null : bm.data;
+    await BK.load();
   }
   let reloadTimer = null, pendingRender = false;
   function scheduleReload() {
@@ -115,6 +129,9 @@
   // ─── views ────────────────────────────────────────────────────────────────────────────
   function view() {
     const h = (location.hash || "").slice(1);
+    const bv = BK.view(h);
+    if (bv) return bv;
+    if (state.role === "coach") return { kind: "bookings", week: null };
     if (h === "programs") return { kind: "programs" };
     if (h === "week") return { kind: "week", week: null };
     if (/^week-\d{4}-\d{2}-\d{2}$/.test(h)) return { kind: "week", week: h.slice(5) };
@@ -129,8 +146,9 @@
   }
 
   function renderTabs() {
-    if (!state.loaded || state.role !== "trainer") { tabs.innerHTML = ""; return; }
+    if (!state.loaded || !isStaffRole(state.role)) { tabs.innerHTML = ""; return; }
     const v = view().kind;
+    if (state.role === "coach") { tabs.innerHTML = `<a href="#bookings" aria-current="page">Bookings</a>`; return; }
     const open = state.notes.filter(needsReview).length;
     const items = [
       ["athletes", "Athletes", v === "athletes"],
@@ -139,6 +157,7 @@
       ["library", "Library", v === "library"],
       ["feedback", `Feedback${open ? ` <span class="count">${open}</span>` : ""}`, v === "feedback"],
       ["boards", "Leaderboards", v === "boards" || v === "board"],
+      ["bookings", "Bookings", v === "bookings" || v === "booking"],
     ];
     tabs.innerHTML = items.map(([h, label, cur]) => `<a href="#${h}" ${cur ? 'aria-current="page"' : ""}>${label}</a>`).join("")
       + `<a href="index.html" class="out">Athlete view ↗</a>`;
@@ -150,7 +169,8 @@
   }
 
   function renderAthletes() {
-    const list = state.members.slice().sort((a, b) => (a.role === b.role ? (a.display_name || a.email).localeCompare(b.display_name || b.email) : a.role === "trainer" ? -1 : 1));
+    const rank = { trainer: 0, coach: 1, athlete: 2 };
+    const list = state.members.slice().sort((a, b) => (a.role === b.role ? (a.display_name || a.email).localeCompare(b.display_name || b.email) : (rank[a.role] ?? 3) - (rank[b.role] ?? 3)));
     let html = `<section class="hero"><div class="eyebrow">Who can sign in</div><h2>Athletes</h2>
       <div class="extra">Add someone here, then they sign in on the athlete site with an email link (or give them a password in Supabase → Authentication → Users).</div></section>`;
     html += `<div class="card table-card"><table class="grid"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Programs</th><th>Open notes</th><th>Last finished</th><th></th></tr></thead><tbody>`;
@@ -158,7 +178,7 @@
       if (state.editingMember === m.email) {
         html += `<tr class="editing"><td colspan="7"><form class="inline-form" id="member-edit" data-email="${esc(m.email)}">
           <label>Name<input name="name" value="${esc(m.display_name || "")}" maxlength="80" required></label>
-          <label>Role<select name="role"><option value="athlete" ${m.role === "athlete" ? "selected" : ""}>Athlete</option><option value="trainer" ${m.role === "trainer" ? "selected" : ""}>Trainer</option></select></label>
+          <label>Role<select name="role">${roleOptions(m.role)}</select></label>
           <label class="check"><input type="checkbox" name="active" ${m.active ? "checked" : ""}> Can sign in</label>
           ${"also_athlete" in m ? `<label class="check"><input type="checkbox" name="also_athlete" ${m.also_athlete ? "checked" : ""}> Trainer also trains (shows as an athlete)</label>` : ""}
           ${groupsReady() ? `<label class="wide">Groups<input name="groups" value="${esc((m.groups || []).join(", "))}" placeholder="e.g. Rehab, Morning crew" list="group-names"></label><datalist id="group-names">${allGroups().map((g) => `<option value="${esc(g)}">`).join("")}</datalist>` : ""}
@@ -171,7 +191,7 @@
       html += `<tr class="${m.active ? "" : "inactive"}">
         <td data-l="Name"><b>${esc(m.display_name || "")}</b>${m.email === state.me ? ` <span class="extra">(you)</span>` : ""}</td>
         <td data-l="Email" class="mono">${esc(m.email)}</td>
-        <td data-l="Role"><span class="chip ${m.role === "trainer" ? "info" : "back"}">${m.role}</span>${m.role === "trainer" && m.also_athlete ? ` <span class="chip back">athlete</span>` : ""}${m.active ? "" : ` <span class="chip hold">inactive</span>`}${(m.groups || []).map((g) => ` <span class="chip">${esc(g)}</span>`).join("")}</td>
+        <td data-l="Role"><span class="chip ${m.role === "trainer" ? "info" : m.role === "coach" ? "swap" : "back"}" ${m.role === "coach" ? 'title="Bookings only: no programs, feedback or settings"' : ""}>${m.role}</span>${m.role === "trainer" && m.also_athlete ? ` <span class="chip back">athlete</span>` : ""}${m.active ? "" : ` <span class="chip hold">inactive</span>`}${(m.groups || []).map((g) => ` <span class="chip">${esc(g)}</span>`).join("")}</td>
         <td data-l="Programs">${isAthlete(m) ? progs : ""}</td>
         <td data-l="Open notes">${isAthlete(m) ? (open ? `<a href="#feedback" data-act="filter-athlete" data-email="${esc(m.email)}">${open}</a>` : "0") : ""}</td>
         <td data-l="Last finished">${fin ? `${esc(programTitle(fin.session_id))} <span class="extra">${esc(fmtWhen(fin.finished_at))}</span>` : `<span class="extra">–</span>`}</td>
@@ -181,9 +201,16 @@
     html += `<section class="card"><h3>Add someone</h3><form class="inline-form" id="member-add">
       <label>Email<input name="email" type="email" required autocomplete="off" placeholder="athlete@example.com"></label>
       <label>Name<input name="name" required maxlength="80" placeholder="First name"></label>
-      <label>Role<select name="role"><option value="athlete">Athlete</option><option value="trainer">Trainer</option></select></label>
+      <label>Role<select name="role">${roleOptions("athlete")}</select></label>
       <div class="row"><button class="btn primary">Add</button></div></form></section>`;
     return html;
+  }
+
+  // "Coach" needs 014_bookings.sql (the database refuses the role before that).
+  function roleOptions(sel) {
+    const opts = [["athlete", "Athlete"], ["trainer", "Trainer (full access)"]];
+    if (BK && state.bk && state.bk.ready) opts.splice(1, 0, ["coach", "Coach (bookings only)"]);
+    return opts.map(([v, l]) => `<option value="${v}" ${sel === v ? "selected" : ""}>${l}</option>`).join("");
   }
 
   function renderPrograms() {
@@ -1009,8 +1036,9 @@
     else if (state.loaded === "checking") html = `<div class="hero"><div class="eyebrow">Loading</div><h2>Opening the console…</h2></div><div class="skeleton"></div>`;
     else if (state.needsMigration) html = `<div class="empty"><strong>One database step first</strong><span>Run <code>supabase/004_trainer_console.sql</code> in Supabase → SQL Editor, then reload this page.</span></div>`;
     else if (state.role === "athlete") html = `<div class="empty"><strong>Trainers only</strong><span>This page is for trainers. Your training log is <a href="index.html">here</a>.</span></div>`;
-    else if (state.role !== "trainer") html = `<div class="empty"><strong>Not on the list</strong><span>${esc(state.me)} isn't set up as a trainer. <button class="signout" data-act="signout">Sign out</button></span></div>`;
+    else if (!isStaffRole(state.role)) html = `<div class="empty"><strong>Not on the list</strong><span>${esc(state.me)} isn't set up as a trainer. <button class="signout" data-act="signout">Sign out</button></span></div>`;
     else if (!state.loaded) html = `<div class="hero"><div class="eyebrow">Loading</div><h2>Opening the console…</h2></div><div class="skeleton"></div>`;
+    else if (v.kind === "bookings" || v.kind === "booking") html = BK.render(v);
     else if (v.kind === "programs") html = renderPrograms();
     else if (v.kind === "week") html = renderWeek(v);
     else if (v.kind === "program") {
@@ -1045,6 +1073,7 @@
     if (f.id === "login-form") return signIn();
     const btn = f.querySelector("button:not([type=button])"); if (btn) btn.disabled = true;
     try {
+      if (await BK.submit(f)) return;
       if (f.id === "member-add") {
         const email = val(f, "email").toLowerCase();
         if (state.members.some((m) => m.email === email)) { flash("They're already on the list."); return; }
@@ -1207,7 +1236,8 @@
   document.addEventListener("click", async (ev) => {
     const btn = ev.target.closest("[data-act]"); if (!btn) return;
     const act = btn.dataset.act, id = btn.dataset.id;
-    if (!/^del-/.test(act)) state.confirm = null;
+    if (!/^(bk-)?del-/.test(act)) state.confirm = null;
+    if (await BK.click(act, btn)) return;
     if (act === "signout") { await sb.auth.signOut(); Object.assign(state, { me: null, role: null, loaded: false }); render(); }
     else if (act === "login-again") { state.login = {}; render(); }
     else if (act === "edit-member") { state.editingMember = btn.dataset.email; render(); }
@@ -1301,7 +1331,7 @@
     state.confirm = null; state.editingMember = null; state.reply = null; state.editingWod = false;
     if (view().kind !== "program") state.edit = null;
     if (view().kind !== "boards") state.wodDraft = null;
-    state.boardAsk = null;
+    state.boardAsk = null; BK.hashChanged();
     render(); window.scrollTo(0, 0);
   });
 
@@ -1333,7 +1363,7 @@
     }
     const row = (w.data || [])[0];
     state.role = row ? row.role : null; state.name = row ? row.display_name : null;
-    if (state.role !== "trainer") { state.loaded = false; render(); return; }
+    if (!isStaffRole(state.role)) { state.loaded = false; render(); return; }
     try { await loadAll(); } catch (e) { state.error = e.message; render(); return; }
     const getJSON = (u) => fetch(u, { cache: "no-cache" }).then((r) => r.json()).catch(() => null);
     Promise.all([loadFileSessions(), getJSON("exercises.json"), getJSON("wods.json")]).then(([files, seed, wods]) => {
@@ -1343,7 +1373,8 @@
     });
     if (channel) sb.removeChannel(channel);
     channel = sb.channel("trainer-console");
-    for (const table of ["members", "programs", "notes", "session_finishes", "wods", "wod_results", "ticks", "wod_board_members"]) channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, scheduleReload);
+    const live = state.role === "coach" ? ["members"] : ["members", "programs", "notes", "session_finishes", "wods", "wod_results", "ticks", "wod_board_members"];
+    for (const table of live.concat(BK.tables)) channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, scheduleReload);
     channel.subscribe();
     document.addEventListener("visibilitychange", () => { if (!document.hidden) scheduleReload(); });
     render();
@@ -1360,5 +1391,5 @@
     if (data.session) await enter(data.session.user.email); else render();
   }
   boot();
-  if (window.TrainingStore.watchForUpdates) window.TrainingStore.watchForUpdates(["console.js", "builder.js", "store.js", "wod.js"]);
+  if (window.TrainingStore.watchForUpdates) window.TrainingStore.watchForUpdates(["console.js", "builder.js", "store.js", "wod.js", "bookings.js"]);
 })();
