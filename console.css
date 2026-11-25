@@ -284,3 +284,12 @@ label.file input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .cw-kg{width:78px}
 .cw-extra{flex:1 1 220px}
 .cw-note{width:100%;resize:vertical;font-weight:400}
+
+/* Profile and Plans (billing) */
+.pill{display:inline-block;border-radius:999px;padding:2px 9px;font-size:12px;font-weight:600;background:var(--line);color:var(--ink);white-space:nowrap}
+.pill.ok{background:var(--done-soft)}
+.pill.warn{background:var(--warn-soft)}
+.pill.off{color:var(--muted)}
+.plan-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-block:8px;border-top:1px solid var(--line)}
+.plan-row:first-of-type{border-top:0}
+.card > .row{display:flex;gap:8px;flex-wrap:wrap}

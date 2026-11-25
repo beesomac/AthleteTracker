@@ -67,6 +67,21 @@ For leaderboards that athletes join from their programs, run `supabase/007_wod_b
 
 After 004, add and rename people in the console (Athletes). Before 004, only the emails in `allowed_emails` can see or change anything; to add someone, run `insert into allowed_emails values ('their@email.com');` in the SQL Editor.
 
+### Payments (Stripe)
+
+Members pick a plan on their **Profile** (`profile.html` on the website, or the Profile tab in the iPhone app) and pay on Stripe's own page. Trainers create and price plans in the console's **Plans** tab, which also shows who is on which plan and whether they've paid. Changing a plan, updating a card, invoices and cancelling are done by the member in Stripe's customer portal (the **Manage billing** button). Card details never reach Supabase or this repo; Supabase keeps only the Stripe customer id, the plan and the subscription status. Stripe only gets the member's email, so keep health details out of plan names.
+
+Setup (test mode first, then the same steps again with live keys):
+
+1. Run `supabase/015_profile_billing.sql` in the SQL Editor (after `014`).
+2. In Stripe (test mode): **Developers → API keys**, copy the **Secret key** (`sk_test_…`).
+3. **Settings → Billing → Customer portal**: turn on "Customers can switch plans" (add your plans' products once they exist), cancellations and invoice history, then **Save**. Checkout works without this; Manage billing doesn't.
+4. Deploy the edge functions (Supabase CLI) and add the secrets in **Supabase → Edge Functions → Secrets**: `STRIPE_SECRET_KEY`, `SITE_URL` (the website address, no trailing slash) and, after step 5, `STRIPE_WEBHOOK_SECRET`.
+5. **Developers → Webhooks → Add endpoint**: `https://zaftplbijgkhnbmwegwt.supabase.co/functions/v1/stripe-webhook`, events `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid`, `invoice.payment_failed`. Copy its **Signing secret** (`whsec_…`) into `STRIPE_WEBHOOK_SECRET`.
+6. Add a plan in the console's Plans tab, then choose it on your Profile and pay with the test card 4242 4242 4242 4242.
+
+The iPhone app opens Stripe in Safari inside the app. Apple allows that instead of in-app purchase because a gym membership is a service used in person (App Review Guideline 3.1.3(e)); don't sell app-only digital content through it.
+
 ### Data for other apps (iOS)
 
 The iPhone app in `ios/` uses these (see `ios/README.md` for how to open and run it in Xcode).
@@ -82,6 +97,8 @@ Everything lives in Supabase, readable with the anon key plus a signed-in user, 
 | `wod_results` | An athlete's own scores; insert one to log a score on an open WOD. `detail` (jsonb, after `011`) holds rounds, what was actually done, and timer splits |
 | `log_benchmark()` | From `supabase/008_benchmarks.sql`: log a benchmark (wods.json id) and open its leaderboard if there isn't one |
 | `wod_board_members` | (007) Who is on each leaderboard; an athlete can read their own rows |
+| `my_profile()`, `update_my_profile()` | (015) The signed-in person's details and membership; change your own name, phone and emergency contact |
+| `plans`, `subscriptions` | (015) Membership plans (active ones) and your own Stripe subscription status |
 | `notifications` | (007) Each person's inbox: `kind` `score`, `board_added` or `wod_again`, `title`, `body`, `read_at`; read and mark your own |
 
 ### 2. Hosting (Vercel)

@@ -124,6 +124,7 @@
     if (h === "library") return { kind: "library", tab: "ex" };
     if (h === "library-wods") return { kind: "library", tab: "wod" };
     if (h === "boards") return { kind: "boards" };
+    if (h === "plans") return { kind: "plans" };
     if (h.startsWith("board-")) return { kind: "board", id: h.slice(6) };
     return { kind: "athletes" };
   }
@@ -139,9 +140,10 @@
       ["library", "Library", v === "library"],
       ["feedback", `Feedback${open ? ` <span class="count">${open}</span>` : ""}`, v === "feedback"],
       ["boards", "Leaderboards", v === "boards" || v === "board"],
+      ["plans", "Plans", v === "plans"],
     ];
     tabs.innerHTML = items.map(([h, label, cur]) => `<a href="#${h}" ${cur ? 'aria-current="page"' : ""}>${label}</a>`).join("")
-      + `<a href="index.html" class="out">Athlete view ↗</a>`;
+      + `<a href="profile.html" class="out">Profile ↗</a><a href="index.html" class="out" style="margin-left:0">Athlete view ↗</a>`;
   }
   function renderWho() {
     if (!state.me) { whoEl.innerHTML = ""; return; }
@@ -1022,6 +1024,7 @@
     else if (v.kind === "library") html = renderLibrary(v);
     else if (v.kind === "boards") html = renderBoards();
     else if (v.kind === "board") html = renderBoard(v);
+    else if (v.kind === "plans") html = window.ConsolePlans.render({ sb, esc, flash, fmtDate, members: () => state.members, rerender: () => render() });
     else html = renderAthletes();
     app.innerHTML = html;
   }

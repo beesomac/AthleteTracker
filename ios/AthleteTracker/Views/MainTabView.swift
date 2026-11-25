@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// The start screen: Program, Leaderboards and Benchmarks.
+/// The start screen: Program, Leaderboards, Benchmarks and Profile.
 struct MainTabView: View {
-    enum TabID: String { case program, leaderboards, benchmarks }
+    enum TabID: String { case program, leaderboards, benchmarks, profile }
     @SceneStorage("tab") private var tab: TabID = .program
     @Environment(AppModel.self) private var model
     @State private var boardPath: [WodRow] = []
@@ -18,6 +18,9 @@ struct MainTabView: View {
             }
             Tab("Benchmarks", systemImage: "chart.bar.xaxis", value: .benchmarks) {
                 BenchmarksView()
+            }
+            Tab("Profile", systemImage: "person.crop.circle", value: .profile) {
+                ProfileView()
             }
         }
         // Three ways in, so a tap is never missed: the view appearing (cold start), the tap itself
