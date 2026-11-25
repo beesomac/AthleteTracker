@@ -5,11 +5,10 @@
 window.TRAINING_CONFIG = {
   supabaseUrl: "https://zaftplbijgkhnbmwegwt.supabase.co",
   supabaseAnonKey: "sb_publishable_x90nGm6xj8KZBHwOqepLtw_KQ3Ftdx4",
-  // Friendly names shown next to ticks and notes, keyed by login email.
   // Who gets notified, shown in the Finish session prompt.
   adminName: "John",
-  people: {
-    "beeso@mac.com": "John",
-    "tkcora387@gmail.com": "Trae",
-  },
+  // Names now come from the members table (trainer console → Athletes). Don't put people's
+  // emails here: this file is public. Only needed for an old database without 004:
+  // { "their@email.com": "Name" }
+  people: {},
 };
