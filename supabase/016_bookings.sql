@@ -1,11 +1,14 @@
--- 015: rehab gym bookings, and "coach" logins (trainers without full admin rights).
+-- 016: rehab gym bookings, and "coach" logins (trainers without full admin rights).
 -- Run after 004 in Supabase → SQL Editor → New query. Safe to run more than once.
--- Doesn't need 005–013 (it adds members.groups itself if 012 hasn't been run).
+-- Doesn't need 005–015 (it adds members.groups itself if 012 hasn't been run).
 -- Best run after 014_privacy_hardening.sql: then bookings and sessions are added to its audit log.
 -- Run before 014, it still works; run this file again after 014 to switch the audit on.
+-- Works alongside 015_profile_billing.sql in either order (no shared tables or columns).
 --
 --   1. A new role, coach: signs in to the console and the iPhone app, sees the Bookings
---      calendar and every person's name and colour, books people in (members or walk-ins) and
+--      calendar and every person's name, groups and colour (through booking_people(), never
+--      the members table, so no phone numbers, emergency contacts or billing from 015),
+--      books people in (members or walk-ins) and
 --      marks who turned up. A coach can't see or change programs, feedback, notes, leaderboards
 --      or members, and can't create or change gym sessions. Trainers keep full rights.
 --   2. gym_slots: the bookable sessions. A time, a type (rehab = supervised rehab, open_gym),
@@ -43,10 +46,18 @@ returns boolean language sql stable security definer set search_path = public as
 $$;
 grant execute on function public.is_staff() to authenticated;
 
--- Coaches can read the member list (names, groups) to book people in; only trainers change it.
+-- Who can be booked in: names and groups only, for trainers and coaches. Coaches don't get
+-- the members table itself (it holds contact and emergency details after 015).
 drop policy if exists "staff read members" on public.members;
-create policy "staff read members" on public.members for select to authenticated
-  using (public.is_staff());
+drop function if exists public.booking_people();
+create or replace function public.booking_people()
+returns table (email text, display_name text, role text, groups text[], active boolean)
+language sql stable security definer set search_path = public as $$
+  select m.email, m.display_name, m.role, m.groups, m.active
+  from public.members m
+  where public.is_staff() and m.active
+  order by coalesce(m.display_name, m.email)
+$$;
 
 -- ─── 2. Gym sessions ─────────────────────────────────────────────────────────────────────
 create table if not exists public.gym_slots (
@@ -171,8 +182,8 @@ grant execute on function public.gym_slot_list(timestamptz, timestamptz) to auth
 -- Signed-out visitors get nothing; signed-in people only what the policies above allow.
 revoke all on public.gym_slots, public.bookings, public.group_colours from anon;
 grant select, insert, update, delete on public.gym_slots, public.bookings, public.group_colours to authenticated;
-revoke execute on function public.is_staff(), public.gym_slot_list(timestamptz, timestamptz) from public, anon;
-grant execute on function public.is_staff(), public.gym_slot_list(timestamptz, timestamptz) to authenticated;
+revoke execute on function public.is_staff(), public.booking_people(), public.gym_slot_list(timestamptz, timestamptz) from public, anon;
+grant execute on function public.is_staff(), public.booking_people(), public.gym_slot_list(timestamptz, timestamptz) to authenticated;
 -- Who booked, cancelled or marked whom, and when (ids and changed column names only).
 do $$
 declare t text;

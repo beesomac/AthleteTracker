@@ -76,7 +76,7 @@ struct BookingsView: View {
     @ViewBuilder private var emptyState: some View {
         if !model.bookingsReady {
             ContentUnavailableView("Bookings aren't set up yet", systemImage: "calendar.badge.clock",
-                                   description: Text("Your trainer needs to run supabase/015_bookings.sql."))
+                                   description: Text("Your trainer needs to run supabase/016_bookings.sql."))
         } else if shown.isEmpty && !model.isLoading {
             ContentUnavailableView("No sessions yet", systemImage: "calendar.badge.clock",
                                    description: Text("Rehab and open gym sessions for the next four weeks show up here."))

@@ -19,7 +19,7 @@ final class AppModel {
     var email: String?
     var me: WhoAmI?
     var isTrainer: Bool { me?.role == "trainer" }
-    /// Coach (supabase/015): bookings only, no programs or athlete data.
+    /// Coach (supabase/016): bookings only, no programs or athlete data.
     var isCoach: Bool { me?.role == "coach" }
     /// Trainers and coaches run the gym floor: they see who's booked and book people in.
     var isStaff: Bool { isTrainer || isCoach }
@@ -46,7 +46,7 @@ final class AppModel {
     var slotBookings: [BookingRow] = []         // staff only: everyone's bookings for those sessions
     var people: [Member] = []                   // staff only: every active member, to book in
     var groupColours: [GroupColour] = []
-    var bookingsReady = true                    // false until supabase/015_bookings.sql has run
+    var bookingsReady = true                    // false until supabase/016_bookings.sql has run
     var isLoading = false
     var loadError: String?
     /// Why a WOD block's score couldn't be saved, by "sessionId__blockKey".

@@ -4,7 +4,7 @@ A SwiftUI app that signs in with the same Supabase accounts as the website. Four
 
 - **Program**: the athlete's published sessions (read-only, except logging a 1RM test).
 - **Leaderboards**: every open and closed board, ranked Rx first; log a score on open ones.
-- **Bookings** (needs `supabase/015_bookings.sql`): rehab gym and open gym sessions for the next
+- **Bookings** (needs `supabase/016_bookings.sql`): rehab gym and open gym sessions for the next
   four weeks with spots left. Athletes book and cancel themselves. Trainers and coaches see who's
   booked in their group colour, tap a session to book someone in (a member or a walk-in's name),
   and swipe to mark came / no-show / cancel. A **coach** login only gets this tab.

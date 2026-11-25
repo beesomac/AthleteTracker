@@ -89,7 +89,8 @@
   // ─── data ─────────────────────────────────────────────────────────────────────────────
   async function loadAll() {
     if (state.role === "coach") {
-      const m = await sb.from("members").select("*").order("display_name");
+      // Names and groups only (016's booking_people); coaches can't read the members table.
+      const m = await sb.rpc("booking_people");
       if (m.error) throw m.error;
       Object.assign(state, { members: m.data, loaded: true });
       await BK.load();

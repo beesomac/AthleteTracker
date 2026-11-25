@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 import Supabase
 
-// Rehab gym bookings (supabase/015_bookings.sql).
+// Rehab gym bookings (supabase/016_bookings.sql).
 // Athletes see sessions with spots left and book or cancel themselves; the database refuses a
 // booking when the session is full, cancelled or has started. Trainers and coaches also see who's
 // booked (in their group colour), book anyone in, add walk-ins and mark who came.
@@ -170,7 +170,7 @@ extension AppModel {
             slots = rows
             bookingsReady = true
         } catch {
-            // Before 015 runs the function doesn't exist: the tab says so instead of an error.
+            // Before 016 runs the function doesn't exist: the tab says so instead of an error.
             let text = "\(error)"
             if text.contains("gym_slot_list") || text.contains("PGRST202") { bookingsReady = false }
             slots = []
@@ -190,11 +190,8 @@ extension AppModel {
                 .execute().value) ?? []
             slotBookings = rows
         }
-        let members: [Member] = (try? await supabase.from("members")
-            .select()
-            .eq("active", value: true)
-            .order("display_name")
-            .execute().value) ?? []
+        // Names and groups only: coaches can't read the members table itself.
+        let members: [Member] = (try? await supabase.rpc("booking_people").execute().value) ?? []
         people = members
     }
 
