@@ -343,3 +343,11 @@ label.file input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .plan-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-block:8px;border-top:1px solid var(--line)}
 .plan-row:first-of-type{border-top:0}
 .card > .row{display:flex;gap:8px;flex-wrap:wrap}
+.bk-names{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
+.bk-names input{border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:500 14px var(--body);background:var(--surface);color:var(--ink);min-width:0}
+.bk-names .row{grid-column:1/-1;display:flex;justify-content:flex-end}
+.bk-picked{display:flex;flex-wrap:wrap;gap:6px;text-transform:none;letter-spacing:0}
+.bk-picked:empty{display:none}
+.bk-picked .pc{font-size:13px;padding:3px 4px 3px 8px}
+.pc-x{border:0;background:none;color:var(--muted);cursor:pointer;font-size:15px;line-height:1;padding:0 2px}
+.pc-x:hover{color:var(--accent)}
