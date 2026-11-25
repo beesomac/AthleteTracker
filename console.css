@@ -351,3 +351,17 @@ label.file input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .bk-picked .pc{font-size:13px;padding:3px 4px 3px 8px}
 .pc-x{border:0;background:none;color:var(--muted);cursor:pointer;font-size:15px;line-height:1;padding:0 2px}
 .pc-x:hover{color:var(--accent)}
+
+/* Group picker (Athletes → Edit / Add): chips + dropdown of existing groups or "New group…" */
+.group-picker{display:grid;gap:6px;min-width:0}
+.inline-form .group-picker{grid-column:span 2}
+@media (max-width:420px){.inline-form .group-picker{grid-column:1/-1}}
+.gp-label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:600;color:var(--muted)}
+.gp-chips{display:flex;flex-wrap:wrap;gap:6px}
+.gp-chips:empty{display:none}
+.gp-chip{display:inline-flex;align-items:center;gap:4px;background:var(--info-soft);color:var(--info);text-transform:none;letter-spacing:0;font-size:13px;padding:3px 4px 3px 9px}
+.gp-chip button{border:0;background:none;color:inherit;cursor:pointer;font-size:15px;line-height:1;padding:0 3px}
+.gp-add{display:flex;gap:6px;align-items:center}
+.gp-add select,.gp-new input{flex:1;min-width:0;border:1px solid var(--line);border-radius:8px;padding:9px 10px;font:500 15px var(--body);background:var(--surface);color:var(--ink)}
+.gp-new{display:flex;gap:6px;flex:1}
+.gp-new[hidden],.gp-add select[hidden]{display:none}

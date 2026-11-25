@@ -184,7 +184,7 @@
           <label>Role<select name="role">${roleOptions(m.role)}</select></label>
           <label class="check"><input type="checkbox" name="active" ${m.active ? "checked" : ""}> Can sign in</label>
           ${"also_athlete" in m ? `<label class="check"><input type="checkbox" name="also_athlete" ${m.also_athlete ? "checked" : ""}> Trainer also trains (shows as an athlete)</label>` : ""}
-          ${groupsReady() ? `<label class="wide">Groups<input name="groups" value="${esc((m.groups || []).join(", "))}" placeholder="e.g. Rehab, Morning crew" list="group-names"></label><datalist id="group-names">${allGroups().map((g) => `<option value="${esc(g)}">`).join("")}</datalist>` : ""}
+          ${groupsReady() ? groupPickerHTML(m.groups || []) : ""}
           <div class="row"><button type="button" class="btn" data-act="cancel-member">Cancel</button><button class="btn primary">Save</button></div></form></td></tr>`;
         continue;
       }
@@ -205,6 +205,7 @@
       <label>Email<input name="email" type="email" required autocomplete="off" placeholder="athlete@example.com"></label>
       <label>Name<input name="name" required maxlength="80" placeholder="First name"></label>
       <label>Role<select name="role">${roleOptions("athlete")}</select></label>
+      ${groupsReady() ? groupPickerHTML([]) : ""}
       <div class="row"><button class="btn primary">Add</button></div></form></section>`;
     return html;
   }
@@ -517,7 +518,52 @@
   // move it, or onto another athlete to copy it there (the copy screen opens with the scaling).
   // "Copy week" on a row copies that athlete's whole week. Groups come from 012_member_groups.sql.
   const groupsReady = () => state.members.some((m) => Array.isArray(m.groups));
-  const allGroups = () => [...new Set(state.members.flatMap((m) => m.groups || []))].sort((a, b) => a.localeCompare(b));
+  const allGroups = () => [...new Set(state.members.flatMap((m) => m.groups || []).concat(state.bk && state.bk.colours ? state.bk.colours.map((c) => c.name) : []))].sort((a, b) => a.localeCompare(b));
+
+  // Groups (leaderboard crews, rehab types): chips, plus a dropdown of existing groups or "New group…".
+  // The hidden "groups" input carries the comma list the save code reads.
+  function groupPickerHTML(current) {
+    return `<div class="wide group-picker"><span class="gp-label">Groups</span><input type="hidden" name="groups" value="${esc(current.join(", "))}">
+      <span class="gp-chips">${groupChipsHTML(current)}</span>
+      <span class="gp-add"><select class="gp-select" aria-label="Add a group">${groupOptionsHTML(current)}</select>
+        <span class="gp-new" hidden><input class="gp-new-name" maxlength="60" placeholder="New group name" aria-label="New group name"><button type="button" class="btn" data-act="gp-add-new">Add</button></span></span></div>`;
+  }
+  function groupChipsHTML(list) {
+    return list.map((g) => `<span class="chip gp-chip">${esc(g)}<button type="button" data-act="gp-remove" data-g="${esc(g)}" aria-label="Remove ${esc(g)}">×</button></span>`).join("");
+  }
+  function groupOptionsHTML(list) {
+    const left = allGroups().filter((g) => !list.includes(g));
+    return `<option value="">${left.length ? "Add a group…" : "Add a group"}</option>${left.map((g) => `<option value="${esc(g)}">${esc(g)}</option>`).join("")}<option value="__new">New group…</option>`;
+  }
+  function pickerGroups(p) { return p.querySelector("input[name=groups]").value.split(",").map((g) => g.trim()).filter(Boolean); }
+  function setPickerGroups(p, list) {
+    p.querySelector("input[name=groups]").value = list.join(", ");
+    p.querySelector(".gp-chips").innerHTML = groupChipsHTML(list);
+    p.querySelector(".gp-select").innerHTML = groupOptionsHTML(list);
+  }
+  function addPickerGroup(p, name) {
+    const g = String(name || "").trim().replace(/,/g, " ").slice(0, 60); if (!g) return;
+    const list = pickerGroups(p);
+    // Same name in another case is the same group.
+    const known = allGroups().find((x) => x.toLowerCase() === g.toLowerCase()) || g;
+    if (!list.some((x) => x.toLowerCase() === known.toLowerCase())) list.push(known);
+    setPickerGroups(p, list);
+  }
+  app.addEventListener("change", (ev) => {
+    const sel = ev.target.closest(".gp-select"); if (!sel) return;
+    const p = sel.closest(".group-picker"), nw = p.querySelector(".gp-new");
+    if (sel.value === "__new") { nw.hidden = false; sel.hidden = true; p.querySelector(".gp-new-name").focus(); return; }
+    if (sel.value) addPickerGroup(p, sel.value);
+  });
+  app.addEventListener("keydown", (ev) => {
+    if (!ev.target.classList || !ev.target.classList.contains("gp-new-name") || ev.key !== "Enter") return;
+    ev.preventDefault(); newGroupDone(ev.target.closest(".group-picker"));
+  });
+  function newGroupDone(p) {
+    const inp = p.querySelector(".gp-new-name");
+    addPickerGroup(p, inp.value); inp.value = "";
+    p.querySelector(".gp-new").hidden = true; p.querySelector(".gp-select").hidden = false;
+  }
   function renderWeek(v) {
     const wk = mondayOf(v.week || today()), days = [0, 1, 2, 3, 4, 5, 6].map((i) => addDays(wk, i));
     const groups = groupsReady() ? allGroups() : [];
@@ -1076,12 +1122,16 @@
     ev.preventDefault();
     if (f.id === "login-form") return signIn();
     const btn = f.querySelector("button:not([type=button])"); if (btn) btn.disabled = true;
+    // A new group typed but not yet added still counts.
+    f.querySelectorAll(".group-picker").forEach((p) => { if (p.querySelector(".gp-new-name").value.trim()) newGroupDone(p); });
     try {
       if (await BK.submit(f)) return;
       if (f.id === "member-add") {
         const email = val(f, "email").toLowerCase();
         if (state.members.some((m) => m.email === email)) { flash("They're already on the list."); return; }
-        await run(sb.from("members").insert({ email, display_name: val(f, "name"), role: val(f, "role") }), "Added " + val(f, "name") + ".");
+        const row = { email, display_name: val(f, "name"), role: val(f, "role") };
+        if (f.elements.groups) row.groups = [...new Set(val(f, "groups").split(",").map((g) => g.trim()).filter(Boolean))];
+        await run(sb.from("members").insert(row), "Added " + val(f, "name") + ".");
       } else if (f.id === "member-edit") {
         const email = f.dataset.email;
         if (email === state.me && (val(f, "role") !== "trainer" || !checked(f, "active"))) { flash("You can't remove your own trainer access here."); return; }
@@ -1244,6 +1294,8 @@
     if (await BK.click(act, btn)) return;
     if (act === "signout") { await sb.auth.signOut(); Object.assign(state, { me: null, role: null, loaded: false }); render(); }
     else if (act === "login-again") { state.login = {}; render(); }
+    else if (act === "gp-remove") { const p = btn.closest(".group-picker"); setPickerGroups(p, pickerGroups(p).filter((g) => g !== btn.dataset.g)); }
+    else if (act === "gp-add-new") { newGroupDone(btn.closest(".group-picker")); }
     else if (act === "edit-member") { state.editingMember = btn.dataset.email; render(); }
     else if (act === "cancel-member") { state.editingMember = null; render(); }
     else if (act === "filter-athlete") { state.athleteFilter = btn.dataset.email; }
