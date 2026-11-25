@@ -67,6 +67,12 @@ For leaderboards that athletes join from their programs, run `supabase/007_wod_b
 
 After 004, add and rename people in the console (Athletes). Before 004, only the emails in `allowed_emails` can see or change anything; to add someone, run `insert into allowed_emails values ('their@email.com');` in the SQL Editor.
 
+### Privacy hardening (health information)
+
+Run `supabase/014_privacy_hardening.sql` once (after 012). It shuts signed-out visitors out of every table and function (no app needs them before sign-in), stops trigger functions being called through the API, fixes the advisor's search-path warnings, and adds an append-only `audit_log`: who added, changed or deleted a note, tick, 1RM, finish, program, score or member, and when. The log keeps ids and changed column names only, never the note text or numbers, and only trainers can read it. Nobody can edit or delete it through the API.
+
+Training notes, injury cues and session summaries are health information under the Privacy Act, so keep real people's emails, names and notes out of this repo (it is public) and in the database.
+
 ### Data for other apps (iOS)
 
 The iPhone app in `ios/` uses these (see `ios/README.md` for how to open and run it in Xcode).
