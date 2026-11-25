@@ -12,7 +12,7 @@
 
   function create(ctx) {
     const { sb, state, esc } = ctx;
-    const bk = state.bk = { ready: null, slots: [], bookings: [], colours: [], from: null, to: null, kind: "", newSlot: false, editing: false, adding: "" };
+    const bk = state.bk = { ready: null, slots: [], bookings: [], colours: [], supervisors: null, from: null, to: null, kind: "", newSlot: false, editing: false, picked: [] };
     const isTrainer = () => state.role === "trainer";
 
     // ─── dates (local time: the gym's clock) ──────────────────────────────────────────────
@@ -48,6 +48,9 @@
       ]);
       if (s.error) { bk.ready = false; bk.slots = []; bk.bookings = []; bk.colours = []; return; }
       Object.assign(bk, { ready: true, from, to, slots: s.data, bookings: (b.data || []).map((r) => { delete r.gym_slots; return r; }), colours: c.data || [] });
+      // Supervisors list comes with 017; before that the dropdown lists trainers and coaches.
+      const sv = await sb.from("supervisors").select("*").order("sort");
+      bk.supervisors = sv.error ? null : sv.data.map((r) => r.name);
     }
     function inRange(week) { return !bk.from || (week >= bk.from && addDays(week, 7) <= bk.to); }
 
@@ -97,10 +100,49 @@
       const staff = state.members.filter((m) => (m.role === "trainer" || m.role === "coach") && m.active);
       return `<option value="">Nobody set</option>` + staff.map((m) => `<option value="${esc(m.email)}" ${m.email === selected ? "selected" : ""}>${esc(m.display_name || m.email)}</option>`).join("");
     }
+    const MAX_SUPERVISORS = 10;
+    function supervisorName(s) { return s.supervisor_name || (s.coach_email ? ctx.nameOf(s.coach_email) : null); }
+    function supervisorSelect(s) {
+      if (!bk.supervisors) return `<label>Supervised by<select name="coach">${staffOptions(s ? s.coach_email : "")}</select></label>`;
+      const cur = s ? supervisorName(s) : "";
+      const names = bk.supervisors.slice();
+      if (cur && !names.includes(cur)) names.push(cur);
+      return `<label>Supervised by<select name="supervisor"><option value="">Nobody set</option>${names.map((n) => `<option ${n === cur ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>`;
+    }
+    function supervisorsHTML() {
+      if (!bk.supervisors) return `<section class="card"><h3>Supervisors</h3><div class="extra">Run <code>supabase/017_supervisors.sql</code> to keep a list of ten supervisor names to pick from. Until then, "Supervised by" lists trainers and coaches.</div></section>`;
+      const boxes = Array.from({ length: MAX_SUPERVISORS }, (_, i) => bk.supervisors[i] || "");
+      return `<section class="card"><div class="card-head"><h3>Supervisors</h3><span class="extra">Up to ${MAX_SUPERVISORS} names for "Supervised by". They don't need a login.</span></div>
+        <form id="bk-supervisors" class="bk-names">${boxes.map((n, i) => `<input name="sv" value="${esc(n)}" maxlength="80" placeholder="Supervisor ${i + 1}" aria-label="Supervisor ${i + 1}">`).join("")}
+        <div class="row"><button class="btn primary">Save supervisors</button></div></form></section>`;
+    }
+
+    // ─── athlete type-ahead ───────────────────────────────────────────────────────────────
+    // Every athlete, by name; the same box takes a walk-in's name when it isn't a member.
+    const athletesAll = () => state.members.filter((m) => m.active && (m.role === "athlete" || m.also_athlete))
+      .sort((a, b) => (a.display_name || a.email).localeCompare(b.display_name || b.email));
+    function labelOf(m) {
+      const name = m.display_name || m.email.split("@")[0];
+      const same = athletesAll().filter((x) => (x.display_name || x.email.split("@")[0]) === name).length > 1;
+      return same ? `${name} (${m.email})` : name;
+    }
+    function athleteList(exclude = new Set()) {
+      return `<datalist id="bk-athletes">${athletesAll().filter((m) => !exclude.has(m.email)).map((m) => {
+        const c = colourOf(m.email);
+        return `<option value="${esc(labelOf(m))}">${c ? esc(c.name) : ""}</option>`;
+      }).join("")}</datalist>`;
+    }
+    function findAthlete(text) {
+      const t = String(text || "").trim().toLowerCase(); if (!t) return null;
+      return athletesAll().find((m) => labelOf(m).toLowerCase() === t || m.email === t) || null;
+    }
+    function pickedHTML() {
+      return bk.picked.map((e) => { const m = memberOf(e); return `<span class="pc"${colourOf(e) ? ` style="--pc:${esc(colourOf(e).colour)}"` : ""}><i></i>${esc(m ? labelOf(m) : e)}<button type="button" class="pc-x" data-act="bk-unpick" data-email="${esc(e)}" aria-label="Remove">×</button></span>`; }).join("");
+    }
 
     function needsMigration() {
       return `<section class="hero"><div class="eyebrow">Rehab gym</div><h2>Bookings</h2></section>
-        <div class="empty"><strong>One database step first</strong><span>Run <code>supabase/014_bookings.sql</code> in Supabase → SQL Editor, then reload this page.</span></div>`;
+        <div class="empty"><strong>One database step first</strong><span>Run <code>supabase/016_bookings.sql</code> in Supabase → SQL Editor, then reload this page.</span></div>`;
     }
 
     function slotFormHTML(s) {
@@ -111,10 +153,11 @@
         <label>Ends<input type="time" name="end" value="${esc(s ? hm(s.ends_at) : "10:00")}" required step="300"></label>
         <label>Type<select name="kind">${Object.entries(KINDS).map(([k, l]) => `<option value="${k}" ${(s ? s.kind : "rehab") === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         <label>People limit<input type="number" name="capacity" min="1" max="200" value="${esc(s ? s.capacity : 8)}" required></label>
-        <label>Supervised by<select name="coach">${staffOptions(s ? s.coach_email : "")}</select></label>
+        ${supervisorSelect(s)}
         <label class="wide">Name (optional)<input name="title" maxlength="120" value="${esc(s ? s.title || "" : "")}" placeholder="e.g. Knee rehab group"></label>
-        ${s ? `<label class="check"><input type="checkbox" name="cancelled" ${s.cancelled ? "checked" : ""}> Session cancelled</label>`
-            : `<label>Repeat weekly<select name="repeat">${[1, 2, 4, 6, 8, 10, 12, 26].map((n) => `<option value="${n}">${n === 1 ? "Just once" : n + " weeks"}</option>`).join("")}</select></label>`}
+        ${s ? `<label class="check"><input type="checkbox" name="cancelled" ${s.cancelled ? "checked" : ""}> Session cancelled</label>` : ""}
+        ${s ? "" : `<label class="full">Athletes (optional: books them in)<input id="bk-pick" list="bk-athletes" autocomplete="off" placeholder="Start typing a name, then Enter">${athleteList(new Set(bk.picked))}
+          <span class="bk-picked" id="bk-picked">${pickedHTML()}</span></label>`}
         <label class="full">Notes (optional)<input name="notes" maxlength="500" value="${esc(s ? s.notes || "" : "")}" placeholder="Shown to athletes when they book"></label>
         <div class="row"><button type="button" class="btn" data-act="${s ? "bk-edit" : "bk-new"}">Cancel</button><button class="btn primary">${s ? "Save" : "Add session"}</button></div></form>`;
     }
@@ -144,7 +187,7 @@
           ${isTrainer() ? `<button class="bk-add" data-act="bk-new" data-date="${d}" aria-label="Add a session on ${esc(dayLabel(d))}" title="Add a session">+</button>` : ""}</div>
           ${list.map(slotCard).join("") || `<div class="bk-none">–</div>`}</div>`;
       }).join("")}</div>`;
-      if (isTrainer()) html += coloursHTML();
+      if (isTrainer()) html += coloursHTML() + supervisorsHTML();
       return html;
     }
     function slotCard(s) {
@@ -163,7 +206,7 @@
       if (!s) return `<div class="empty"><strong>Session not found</strong><span>It may have been deleted. <a href="#bookings">Back to bookings</a></span></div>`;
       const rows = slotBookings(s.id).slice().sort((a, b) => (LIVE(b) - LIVE(a)) || personName(a).localeCompare(personName(b)));
       const n = taken(s.id), d = dayOf(s.starts_at), past = new Date(s.ends_at) < new Date();
-      const coach = s.coach_email ? ctx.nameOf(s.coach_email) : null;
+      const coach = supervisorName(s);
       let html = `<section class="hero"><div class="eyebrow"><a href="#bookings-${mondayOf(d)}">Bookings</a> · ${esc(dayLabel(d, { weekday: "long", day: "numeric", month: "long" }))}</div>
         <h2>${esc(timeLabel(s.starts_at))}–${esc(timeLabel(s.ends_at))} ${esc(s.title || KINDS[s.kind])}</h2>
         <div class="toolbar">${kindChip(s.kind)} ${s.cancelled ? `<span class="chip hold">Cancelled</span>` : ""}<b>${esc(spotsText(s))}</b>${coach ? `<span class="extra">Supervised by ${esc(coach)}</span>` : ""}
@@ -177,15 +220,10 @@
       // Book someone in
       if (!s.cancelled) {
         const already = new Set(rows.filter((b) => b.member_email && b.status !== "cancelled").map((b) => b.member_email));
-        const people = state.members.filter((m) => m.active && !already.has(m.email)).sort((a, b) => (a.display_name || a.email).localeCompare(b.display_name || b.email));
         const full = n >= s.capacity;
         html += `<section class="card"><div class="card-head"><h3>Book someone in</h3>${full ? `<span class="chip swap">Full: this goes over the limit of ${s.capacity}</span>` : ""}</div>
           <form class="inline-form" id="bk-book" data-id="${esc(s.id)}">
-            <label class="wide">Member<select name="member"><option value="">Choose a person…</option>${people.map((m) => {
-              const c = colourOf(m.email);
-              return `<option value="${esc(m.email)}">${esc(m.display_name || m.email)}${c ? " · " + esc(c.name) : ""}${m.role !== "athlete" ? " (" + esc(m.role) + ")" : ""}</option>`;
-            }).join("")}</select></label>
-            <label class="wide">…or a walk-in who isn't a member<input name="guest" maxlength="80" placeholder="Their name"></label>
+            <label class="full">Athlete<input name="who" list="bk-athletes" maxlength="80" autocomplete="off" placeholder="Start typing a name. Someone not on the list is booked as a walk-in." required>${athleteList(already)}</label>
             <label class="check"><input type="checkbox" name="walkin" ${past || d === today() ? "checked" : ""}> They're here now (mark as came)</label>
             <div class="row"><button class="btn primary">Book in</button></div></form></section>`;
       }
@@ -212,21 +250,29 @@
       const date = val(f, "date"), start = val(f, "start"), end = val(f, "end");
       if (!date || !start || !end) return null;
       if (end <= start) { ctx.flash("The session has to end after it starts."); return null; }
-      return { date, start, end, row: { kind: val(f, "kind"), capacity: Number(val(f, "capacity")) || 8, coach_email: val(f, "coach") || null, title: val(f, "title") || null, notes: val(f, "notes") || null } };
+      const row = { kind: val(f, "kind"), capacity: Number(val(f, "capacity")) || 8, title: val(f, "title") || null, notes: val(f, "notes") || null };
+      if (f.elements.supervisor) Object.assign(row, { supervisor_name: val(f, "supervisor") || null, coach_email: null });
+      else row.coach_email = val(f, "coach") || null;
+      return { date, start, end, row };
     }
 
     async function submit(f) {
       if (f.id === "bk-slot-add") {
         const x = slotRow(f); if (!x) return true;
-        const n = Math.max(1, Number(val(f, "repeat")) || 1), series = n > 1 ? (crypto.randomUUID ? crypto.randomUUID() : null) : null;
-        const rows = [];
-        for (let i = 0; i < n; i++) {
-          const d = addDays(x.date, i * 7);
-          rows.push(Object.assign({ starts_at: local(d, x.start), ends_at: local(d, x.end), series_id: series, created_by_email: state.me }, x.row));
+        // A name typed but not yet added with Enter still counts.
+        const typed = findAthlete(val(f, "bk-pick") || (document.getElementById("bk-pick") || {}).value);
+        if (typed && !bk.picked.includes(typed.email)) bk.picked.push(typed.email);
+        const row = Object.assign({ starts_at: local(x.date, x.start), ends_at: local(x.date, x.end), created_by_email: state.me }, x.row);
+        const { data, error } = await sb.from("gym_slots").insert(row).select().single();
+        if (error) { ctx.failed(error); return true; }
+        const who = bk.picked.slice();
+        if (who.length) {
+          const r = await sb.from("bookings").insert(who.map((e) => ({ slot_id: data.id, member_email: e, status: "booked", booked_by_email: state.me })));
+          if (r.error) ctx.failed(r.error);
         }
-        if (await ctx.run(sb.from("gym_slots").insert(rows),n > 1 ? `Added ${n} weekly sessions.` : "Session added.")) {
-          bk.newSlot = false; location.hash = "bookings-" + mondayOf(x.date);
-        }
+        bk.newSlot = false; bk.picked = [];
+        await ctx.run(Promise.resolve({}), who.length ? `Session added with ${who.length} athlete${who.length > 1 ? "s" : ""} booked in.` : "Session added.");
+        location.hash = "bookings-" + mondayOf(x.date);
         return true;
       }
       if (f.id === "bk-slot-edit") {
@@ -236,14 +282,21 @@
         return true;
       }
       if (f.id === "bk-book") {
-        const member = val(f, "member"), guest = val(f, "guest"), here = !!(f.elements.walkin && f.elements.walkin.checked);
-        if (!member && !guest) { ctx.flash("Choose a member or type a walk-in's name."); return true; }
-        if (member && guest) { ctx.flash("Pick a member or type a walk-in's name, not both."); return true; }
+        const typed = val(f, "who"), here = !!(f.elements.walkin && f.elements.walkin.checked);
+        if (!typed) { ctx.flash("Type an athlete's name, or a walk-in's."); return true; }
+        const m = findAthlete(typed), member = m ? m.email : "", guest = m ? "" : typed;
         const row = { slot_id: f.dataset.id, member_email: member || null, guest_name: member ? null : guest, walk_in: !member || here, status: here ? "attended" : "booked", booked_by_email: state.me };
         // A cancelled booking for the same person comes back instead of adding a second row.
         const old = member && bk.bookings.find((b) => b.slot_id === f.dataset.id && b.member_email === member && b.status === "cancelled");
         const q = old ? sb.from("bookings").update({ status: row.status, walk_in: row.walk_in, booked_by_email: state.me }).eq("id", old.id) : sb.from("bookings").insert(row);
-        await ctx.run(q, (member ? ctx.nameOf(member) : guest) + (here ? " is in." : " is booked in."));
+        await ctx.run(q, (member ? ctx.nameOf(member) : guest + " (walk-in, not a member)") + (here ? " is in." : " is booked in."));
+        return true;
+      }
+      if (f.id === "bk-supervisors") {
+        const names = [...new Set([...f.querySelectorAll("input[name=sv]")].map((i) => i.value.trim()).filter(Boolean))].slice(0, MAX_SUPERVISORS);
+        const del = await sb.from("supervisors").delete().neq("name", "\u0000");
+        if (del.error) { ctx.failed(del.error); return true; }
+        await ctx.run(names.length ? sb.from("supervisors").insert(names.map((name, i) => ({ name, sort: i }))) : Promise.resolve({}), "Supervisors saved.");
         return true;
       }
       if (f.id === "bk-colours") {
@@ -262,10 +315,11 @@
       const id = btn.dataset.id;
       if (act === "bk-kind") { bk.kind = btn.dataset.k || ""; ctx.render(); }
       else if (act === "bk-new") {
-        bk.newDate = btn.dataset.date || null; bk.newSlot = btn.dataset.date ? true : !bk.newSlot; ctx.render();
+        bk.newDate = btn.dataset.date || null; bk.picked = []; bk.newSlot = btn.dataset.date ? true : !bk.newSlot; ctx.render();
         const c = document.getElementById("bk-new-card"); if (c) c.scrollIntoView({ block: "start", behavior: "smooth" });
       }
       else if (act === "bk-edit") { bk.editing = !bk.editing; ctx.render(); }
+      else if (act === "bk-unpick") { bk.picked = bk.picked.filter((e) => e !== btn.dataset.email); refreshPicked(); }
       else if (act === "bk-status") {
         const b = bk.bookings.find((x) => x.id === id); if (!b) return true;
         await ctx.run(sb.from("bookings").update({ status: btn.dataset.s }).eq("id", id), `${personName(b)}: ${STATUS[btn.dataset.s].toLowerCase()}.`);
@@ -283,7 +337,29 @@
       return true;
     }
 
-    function hashChanged() { bk.editing = false; bk.newSlot = false; }
+    function hashChanged() { bk.editing = false; bk.newSlot = false; bk.picked = []; }
+
+    // New session's athlete box: pick from the list (or press Enter) to add a chip.
+    function refreshPicked() {
+      const el = document.getElementById("bk-picked"); if (el) el.innerHTML = pickedHTML();
+      const dl = document.getElementById("bk-athletes"); if (dl) dl.outerHTML = athleteList(new Set(bk.picked));
+    }
+    function addPicked(input) {
+      const m = findAthlete(input.value);
+      if (!m) return false;
+      if (!bk.picked.includes(m.email)) bk.picked.push(m.email);
+      input.value = ""; refreshPicked(); input.focus();
+      return true;
+    }
+    // Picking from the list adds straight away; typing a name that happens to match waits for Enter.
+    document.addEventListener("input", (ev) => {
+      if (ev.target.id === "bk-pick" && (!ev.inputType || ev.inputType === "insertReplacementText") && findAthlete(ev.target.value)) addPicked(ev.target);
+    });
+    document.addEventListener("keydown", (ev) => {
+      if (ev.target.id !== "bk-pick" || ev.key !== "Enter") return;
+      ev.preventDefault();
+      if (ev.target.value.trim() && !addPicked(ev.target)) ctx.flash("No athlete called \"" + ev.target.value.trim() + "\". Pick a name from the list.");
+    });
 
     return { view, render, load, submit, click, hashChanged, tables: ["gym_slots", "bookings", "group_colours"] };
   }
