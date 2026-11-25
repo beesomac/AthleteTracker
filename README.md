@@ -96,7 +96,7 @@ Everything lives in Supabase, readable with the anon key plus a signed-in user, 
 
 | Table / function | What it holds |
 |---|---|
-| `whoami()` | The signed-in person's email, name and role (`trainer` or `athlete`) |
+| `whoami()` | The signed-in person's email, name and role (`trainer`, `coach` (016: bookings only) or `athlete`) |
 | `programs` | Published sessions: `id`, `athlete_email` (null = everyone), `date`, `title`, `body` (the session JSON) |
 | `ticks`, `notes`, `session_finishes`, `lift_maxes` | Per-athlete feedback, keyed by `athlete_email` + `session_id` (= program `id`) |
 | `wods`, `wod_board()` | WODs and their ranked boards (names only, best score per athlete). Scores: seconds for time, reps, kg, or rounds × 1000 + reps; `wod.js` formats them |
@@ -106,6 +106,9 @@ Everything lives in Supabase, readable with the anon key plus a signed-in user, 
 | `my_profile()`, `update_my_profile()` | (015) The signed-in person's details and membership; change your own name, phone and emergency contact |
 | `plans`, `subscriptions` | (015) Membership plans (active ones) and your own Stripe subscription status |
 | `notifications` | (007) Each person's inbox: `kind` `score`, `board_added` or `wod_again`, `title`, `body`, `read_at`; read and mark your own |
+| `gym_slot_list(p_from, p_to)` | (016) Rehab gym sessions in a time range: type (`rehab` / `open_gym`), `capacity`, `booked`, and your own booking (`my_booking_id`, `my_status`) |
+| `bookings` | (016) Insert `{slot_id, member_email: you}` to book, update `status` to `cancelled` to cancel. The database refuses full, cancelled or started sessions. Trainers and coaches read and change all of them, including walk-ins (`guest_name`) and `attended` / `no_show` |
+| `group_colours` | (016) A colour (`#RRGGBB`) per member group; a person shows in their first coloured group |
 
 ### 2. Hosting (Vercel)
 
