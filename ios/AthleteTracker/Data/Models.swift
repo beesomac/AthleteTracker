@@ -22,12 +22,13 @@ nonisolated struct Member: Decodable, Sendable, Identifiable, Hashable {
     let role: String
     let active: Bool?
     let alsoAthlete: Bool?
+    let groups: [String]?
 
     var id: String { email }
     var name: String { displayName ?? email.components(separatedBy: "@").first ?? email }
 
     enum CodingKeys: String, CodingKey {
-        case email, role, active
+        case email, role, active, groups
         case displayName = "display_name"
         case alsoAthlete = "also_athlete"
     }

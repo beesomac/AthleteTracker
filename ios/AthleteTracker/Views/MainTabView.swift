@@ -1,17 +1,28 @@
 import SwiftUI
 
-/// The start screen: Program, Leaderboards and Benchmarks.
+/// The start screen: Program, Bookings, Leaderboards and Benchmarks. A coach gets Bookings only.
 struct MainTabView: View {
-    enum TabID: String { case program, leaderboards, benchmarks }
+    enum TabID: String { case program, bookings, leaderboards, benchmarks }
     @SceneStorage("tab") private var tab: TabID = .program
     @Environment(AppModel.self) private var model
     @State private var boardPath: [WodRow] = []
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
+        if model.isCoach {
+            BookingsView()
+        } else {
+            tabs
+        }
+    }
+
+    private var tabs: some View {
         TabView(selection: $tab) {
             Tab("Program", systemImage: "calendar", value: .program) {
                 SessionsListView()
+            }
+            Tab("Bookings", systemImage: "calendar.badge.clock", value: .bookings) {
+                BookingsView()
             }
             Tab("Leaderboards", systemImage: "trophy", value: .leaderboards) {
                 LeaderboardsView(path: $boardPath)

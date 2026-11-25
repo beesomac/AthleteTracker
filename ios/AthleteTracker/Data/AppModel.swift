@@ -19,6 +19,10 @@ final class AppModel {
     var email: String?
     var me: WhoAmI?
     var isTrainer: Bool { me?.role == "trainer" }
+    /// Coach (supabase/016): bookings only, no programs or athlete data.
+    var isCoach: Bool { me?.role == "coach" }
+    /// Trainers and coaches run the gym floor: they see who's booked and book people in.
+    var isStaff: Bool { isTrainer || isCoach }
 
     /// Athletes a trainer can pick from (athletes plus trainers who also train).
     var athletes: [Member] = []
@@ -36,6 +40,13 @@ final class AppModel {
     var board: [BoardRow] = []                  // wod_board(): best score per athlete per board
     var results: [ResultRow] = []               // the athlete's own scores
     var maxes: [String: LiftMax] = [:]          // lift key → 1RM
+
+    // Rehab gym bookings (AppModel+Bookings.swift)
+    var slots: [GymSlot] = []                   // gym_slot_list(): sessions with spots left and my booking
+    var slotBookings: [BookingRow] = []         // staff only: everyone's bookings for those sessions
+    var people: [Member] = []                   // staff only: every active member, to book in
+    var groupColours: [GroupColour] = []
+    var bookingsReady = true                    // false until supabase/016_bookings.sql has run
     var isLoading = false
     var loadError: String?
     /// Why a WOD block's score couldn't be saved, by "sessionId__blockKey".
@@ -90,6 +101,10 @@ final class AppModel {
         board = []
         results = []
         maxes = [:]
+        slots = []
+        slotBookings = []
+        people = []
+        groupColours = []
         loadError = nil
     }
 
@@ -103,6 +118,15 @@ final class AppModel {
                 return
             }
             me = row
+            if row.role == "coach" {
+                // A coach has no training log here: just Bookings.
+                athletes = []
+                athleteEmail = email
+                phase = .signedIn
+                Task { await Push.shared.signedInAsMember() }
+                await loadBookings()
+                return
+            }
             if row.role == "trainer" {
                 let members: [Member] = try await supabase.from("members")
                     .select()
@@ -159,6 +183,7 @@ final class AppModel {
                 .execute().value) ?? []
             finished = Dictionary(finishRows.map { ($0.sessionId, $0) }, uniquingKeysWith: { a, _ in a })
             await loadBenchmarks(for: athlete)
+            await loadBookings()
             loadError = nil
         } catch {
             loadError = error.localizedDescription
